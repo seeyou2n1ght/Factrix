@@ -1,0 +1,312 @@
+{
+  "000001": [
+    {
+      "stock_code": "600519",
+      "stock_name": "贵州茅台",
+      "weight": 0.085,
+      "sector": "消费"
+    },
+    {
+      "stock_code": "300750",
+      "stock_name": "宁德时代",
+      "weight": 0.072,
+      "sector": "新能源"
+    },
+    {
+      "stock_code": "600036",
+      "stock_name": "招商银行",
+      "weight": 0.058,
+      "sector": "金融"
+    },
+    {
+      "stock_code": "002475",
+      "stock_name": "立讯精密",
+      "weight": 0.051,
+      "sector": "电子"
+    },
+    {
+      "stock_code": "600276",
+      "stock_name": "恒瑞医药",
+      "weight": 0.045,
+      "sector": "医药"
+    },
+    {
+      "stock_code": "300760",
+      "stock_name": "迈瑞医疗",
+      "weight": 0.042,
+      "sector": "医药"
+    },
+    {
+      "stock_code": "000858",
+      "stock_name": "五粮液",
+      "weight": 0.039,
+      "sector": "消费"
+    },
+    {
+      "stock_code": "002594",
+      "stock_name": "比亚迪",
+      "weight": 0.035,
+      "sector": "新能源"
+    },
+    {
+      "stock_code": "601318",
+      "stock_name": "中国平安",
+      "weight": 0.031,
+      "sector": "金融"
+    },
+    {
+      "stock_code": "00700",
+      "stock_name": "腾讯控股",
+      "weight": 0.028,
+      "sector": "互联网"
+    }
+  ],
+  "014114": [
+    {
+      "stock_code": "603259",
+      "stock_name": "药明康德",
+      "weight": 0.092,
+      "sector": "医药"
+    },
+    {
+      "stock_code": "600276",
+      "stock_name": "恒瑞医药",
+      "weight": 0.088,
+      "sector": "医药"
+    },
+    {
+      "stock_code": "300760",
+      "stock_name": "迈瑞医疗",
+      "weight": 0.075,
+      "sector": "医药"
+    },
+    {
+      "stock_code": "600436",
+      "stock_name": "片仔癀",
+      "weight": 0.061,
+      "sector": "医药"
+    },
+    {
+      "stock_code": "300015",
+      "stock_name": "爱尔眼科",
+      "weight": 0.053,
+      "sector": "医药"
+    },
+    {
+      "stock_code": "688235",
+      "stock_name": "百济神州",
+      "weight": 0.048,
+      "sector": "医药"
+    },
+    {
+      "stock_code": "01801",
+      "stock_name": "信达生物",
+      "weight": 0.042,
+      "sector": "医药"
+    },
+    {
+      "stock_code": "09926",
+      "stock_name": "康方生物",
+      "weight": 0.038,
+      "sector": "医药"
+    },
+    {
+      "stock_code": "688271",
+      "stock_name": "联影医疗",
+      "weight": 0.031,
+      "sector": "医药"
+    },
+    {
+      "stock_code": "000963",
+      "stock_name": "华东医药",
+      "weight": 0.025,
+      "sector": "医药"
+    }
+  ],
+  "001900": [
+    {
+      "stock_code": "688981",
+      "stock_name": "中芯国际",
+      "weight": 0.098,
+      "sector": "半导体"
+    },
+    {
+      "stock_code": "300661",
+      "stock_name": "圣邦股份",
+      "weight": 0.085,
+      "sector": "半导体"
+    },
+    {
+      "stock_code": "603501",
+      "stock_name": "韦尔股份",
+      "weight": 0.074,
+      "sector": "半导体"
+    },
+    {
+      "stock_code": "002371",
+      "stock_name": "北方华创",
+      "weight": 0.068,
+      "sector": "半导体"
+    },
+    {
+      "stock_code": "603986",
+      "stock_name": "兆易创新",
+      "weight": 0.059,
+      "sector": "半导体"
+    },
+    {
+      "stock_code": "300782",
+      "stock_name": "卓胜微",
+      "weight": 0.052,
+      "sector": "半导体"
+    },
+    {
+      "stock_code": "600584",
+      "stock_name": "长电科技",
+      "weight": 0.045,
+      "sector": "半导体"
+    },
+    {
+      "stock_code": "002049",
+      "stock_name": "紫光国微",
+      "weight": 0.039,
+      "sector": "半导体"
+    },
+    {
+      "stock_code": "688012",
+      "stock_name": "中微公司",
+      "weight": 0.033,
+      "sector": "半导体"
+    },
+    {
+      "stock_code": "688041",
+      "stock_name": "海光信息",
+      "weight": 0.029,
+      "sector": "半导体"
+    }
+  ],
+  "012094": [
+    {
+      "stock_code": "300750",
+      "stock_name": "宁德时代",
+      "weight": 0.095,
+      "sector": "新能源"
+    },
+    {
+      "stock_code": "300274",
+      "stock_name": "阳光电源",
+      "weight": 0.082,
+      "sector": "新能源"
+    },
+    {
+      "stock_code": "601012",
+      "stock_name": "隆基绿能",
+      "weight": 0.069,
+      "sector": "光伏"
+    },
+    {
+      "stock_code": "300141",
+      "stock_name": "亿纬锂能",
+      "weight": 0.058,
+      "sector": "新能源"
+    },
+    {
+      "stock_code": "600438",
+      "stock_name": "通威股份",
+      "weight": 0.051,
+      "sector": "光伏"
+    },
+    {
+      "stock_code": "688223",
+      "stock_name": "晶科能源",
+      "weight": 0.044,
+      "sector": "光伏"
+    },
+    {
+      "stock_code": "002594",
+      "stock_name": "比亚迪",
+      "weight": 0.039,
+      "sector": "新能源"
+    },
+    {
+      "stock_code": "300124",
+      "stock_name": "汇川技术",
+      "weight": 0.034,
+      "sector": "制造"
+    },
+    {
+      "stock_code": "002460",
+      "stock_name": "赣锋锂业",
+      "weight": 0.029,
+      "sector": "资源"
+    },
+    {
+      "stock_code": "002466",
+      "stock_name": "天齐锂业",
+      "weight": 0.025,
+      "sector": "资源"
+    }
+  ],
+  "022502": [
+    {
+      "stock_code": "601899",
+      "stock_name": "紫金矿业",
+      "weight": 0.099,
+      "sector": "有色金属"
+    },
+    {
+      "stock_code": "600547",
+      "stock_name": "山东黄金",
+      "weight": 0.091,
+      "sector": "黄金"
+    },
+    {
+      "stock_code": "600489",
+      "stock_name": "中金黄金",
+      "weight": 0.083,
+      "sector": "黄金"
+    },
+    {
+      "stock_code": "600988",
+      "stock_name": "赤峰黄金",
+      "weight": 0.072,
+      "sector": "黄金"
+    },
+    {
+      "stock_code": "000975",
+      "stock_name": "银泰黄金",
+      "weight": 0.061,
+      "sector": "黄金"
+    },
+    {
+      "stock_code": "002155",
+      "stock_name": "湖南黄金",
+      "weight": 0.052,
+      "sector": "黄金"
+    },
+    {
+      "stock_code": "601069",
+      "stock_name": "西部黄金",
+      "weight": 0.044,
+      "sector": "黄金"
+    },
+    {
+      "stock_code": "002237",
+      "stock_name": "恒邦股份",
+      "weight": 0.036,
+      "sector": "黄金"
+    },
+    {
+      "stock_code": "01818",
+      "stock_name": "招金矿业",
+      "weight": 0.03,
+      "sector": "黄金"
+    },
+    {
+      "stock_code": "600916",
+      "stock_name": "中国黄金",
+      "weight": 0.022,
+      "sector": "黄金"
+    }
+  ]
+}

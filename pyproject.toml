@@ -1,0 +1,47 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "factrix"
+version = "0.1.0"
+description = "个人公募基金持仓穿透分析与智能调仓诊断框架"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "streamlit>=1.30.0",
+    "pandas>=2.0.0",
+    "numpy>=1.24.0",
+    "scipy>=1.10.0",
+    "akshare>=1.12.0",
+    "plotly>=5.18.0",
+    "pytest>=7.4.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=7.4.0",
+    "pytest-cov>=4.1.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["src*"]
+
+[tool.pytest.ini_options]
+minversion = "7.0"
+addopts = "-ra -q --tb=short"
+testpaths = [
+    "tests",
+]
+pythonpath = [
+    ".",
+    "src",
+]
+markers = [
+    "tier1: Functional Happy Path test cases",
+    "tier2: Boundary & Edge case test cases",
+    "tier3: Cross-combination & Multi-factor test cases",
+    "tier4: Headless Real-world E2E test cases",
+]
+
