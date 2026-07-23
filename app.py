@@ -22,7 +22,12 @@ BASE_DIR = Path(__file__).resolve().parent
 if str(BASE_DIR) not in sys.path:
     sys.path.insert(0, str(BASE_DIR))
 
-from src.config import DEFAULT_CSV_PATH, DB_PATH, RBSA_BENCHMARKS
+from src.config import (
+    DEFAULT_FILE_PATH,
+    DB_PATH,
+    RBSA_BENCHMARKS,
+    get_latest_data_file,
+)
 from src.data.csv_parser import parse_fundlist_csv
 from src.data.storage import SQLiteStorage
 from src.data.fetcher import FundFetcher
@@ -33,20 +38,29 @@ from src.engine.cvar_stress import CVaRStressEngine
 from src.engine.prospect_theory import ProspectTheoryEngine
 from src.engine.rebalance import RebalanceEngine
 from src.engine.health_score import HealthScoreEngine
+from src.engine.alpha_beta import AlphaBetaEngine
+from src.engine.report import ReportGeneratorEngine
 from src.ui.components import (
     set_global_css,
     render_vernacular_callout,
     render_health_score_card,
     render_rebalance_guide,
     render_top_stocks_table,
+    render_risk_profile_card,
+    render_rmb_loss_simulation,
+    create_portfolio_treemap,
 )
 from src.ui.charts import (
     create_overlap_heatmap,
+    create_macro_asset_pie,
+    create_sector_pie,
     create_style_radar,
     create_style_drift_line,
     create_cvar_stress_bar,
     create_prospect_bubble,
     create_rebalance_bar,
+    create_risk_gauge_chart,
+    create_alpha_beta_scatter,
 )
 
 logger = logging.getLogger("app")
@@ -128,8 +142,30 @@ def generate_fallback_holdings(fund_code: str) -> pd.DataFrame:
 
 
 
+def generate_fallback_industry_allocation(fund_code: str) -> pd.DataFrame:
+    """Generate varied synthetic CSRC industry allocation fallback when data is missing."""
+    sample_industries = [
+        ('制造业', 0.55, '科技制造'),
+        ('金融业', 0.20, '大金融'),
+        ('信息传输、软件和信息技术服务业', 0.15, '科技制造'),
+        ('批发和零售业', 0.10, '大消费'),
+    ]
+    records = []
+    for iname, w, bsec in sample_industries:
+        records.append({
+            'industry_name': iname,
+            'weight': float(w),
+            'market_value': 0.0,
+            'broad_sector': bsec,
+            'report_date': '2026-06-30'
+        })
+    return pd.DataFrame(records)
+
+
 # --- Data Pipeline Execution ---
 
+
+@st.cache_data
 def load_and_analyze_data(csv_path: str) -> Dict[str, Any]:
     """Load fund list CSV, fetch NAV/holdings via FundFetcher, run 7 engines, and return results.
 
@@ -141,6 +177,9 @@ def load_and_analyze_data(csv_path: str) -> Dict[str, Any]:
     """
     # 1. Parse CSV
     df_funds = parse_fundlist_csv(csv_path, aggregate=True)
+
+    if df_funds is None or df_funds.empty:
+        return {}
 
     fund_codes = df_funds['fund_code'].tolist()
     market_values = dict(zip(df_funds['fund_code'], df_funds['market_value']))
@@ -155,6 +194,7 @@ def load_and_analyze_data(csv_path: str) -> Dict[str, Any]:
 
     nav_df_dict: Dict[str, pd.DataFrame] = {}
     holdings_dict: Dict[str, pd.DataFrame] = {}
+    industry_dict: Dict[str, pd.DataFrame] = {}
 
     for code in fund_codes:
         try:
@@ -175,10 +215,22 @@ def load_and_analyze_data(csv_path: str) -> Dict[str, Any]:
             logger.warning(f"Error fetching holdings for fund {code}, using fallback: {e}")
             holdings_dict[code] = generate_fallback_holdings(code)
 
+        try:
+            df_ind = fetcher.get_fund_industry_allocation(code)
+            if df_ind is None or df_ind.empty:
+                df_ind = generate_fallback_industry_allocation(code)
+            industry_dict[code] = df_ind
+        except Exception as e:
+            logger.warning(f"Error fetching industry allocation for fund {code}, using fallback: {e}")
+            industry_dict[code] = generate_fallback_industry_allocation(code)
+
     # 3. Fetch Benchmark Factor Indices
     benchmark_nav_dict: Dict[str, pd.DataFrame] = {}
-    # Use date index from first fund's NAV
-    first_nav_dates = next(iter(nav_df_dict.values()))['date']
+    # Use date index from first fund's NAV (safely handle empty nav_df_dict)
+    if nav_df_dict and 'date' in next(iter(nav_df_dict.values())).columns:
+        first_nav_dates = next(iter(nav_df_dict.values()))['date']
+    else:
+        first_nav_dates = pd.date_range(end=pd.Timestamp.now(), periods=180, freq='B').strftime('%Y-%m-%d')
 
     for factor_key, b_code in RBSA_BENCHMARKS.items():
         try:
@@ -192,7 +244,8 @@ def load_and_analyze_data(csv_path: str) -> Dict[str, Any]:
 
     # 4. Execute 7 Analytical Engines
     # Engine 1: PBSA Penetration
-    pbsa_res = PBSAEngine.calculate(holdings_dict, market_values)
+    fund_names = dict(zip(df_funds['fund_code'], df_funds['fund_name']))
+    pbsa_res = PBSAEngine.calculate(holdings_dict, market_values, industry_dict=industry_dict, fund_names=fund_names)
 
     # Engine 2: RBSA Style Regression
     rbsa_res = RBSAEngine.calculate(nav_df_dict, benchmark_nav_dict, market_values)
@@ -214,10 +267,17 @@ def load_and_analyze_data(csv_path: str) -> Dict[str, Any]:
         pbsa_res, rbsa_res, rolling_res, cvar_res, prospect_res, rebalance_res
     )
 
-    return {
+    # Engine 8: Alpha & Beta Performance Attribution Engine
+    alpha_beta_res = AlphaBetaEngine.calculate(
+        nav_df_dict=nav_df_dict,
+        market_benchmark_df=benchmark_nav_dict.get('large_value'),
+        fund_market_values=market_values
+    )
+
+    res_dict = {
         'df_funds': df_funds,
         'total_value': total_value,
-        'n_funds': len(fund_codes),
+        'n_funds': len(df_funds),
         'pbsa_res': pbsa_res,
         'rbsa_res': rbsa_res,
         'rolling_res': rolling_res,
@@ -225,7 +285,13 @@ def load_and_analyze_data(csv_path: str) -> Dict[str, Any]:
         'prospect_res': prospect_res,
         'rebalance_res': rebalance_res,
         'health_res': health_res,
+        'alpha_beta_res': alpha_beta_res
     }
+
+    # Generate Markdown Report as a byproduct of running the pipeline
+    ReportGeneratorEngine.generate_markdown(res_dict)
+
+    return res_dict
 
 
 # --- Main Streamlit Application ---
@@ -248,10 +314,10 @@ def main() -> None:
     # --- Sidebar Settings ---
     st.sidebar.header("⚙️ 数据与参数设置")
 
-    csv_input_path = st.sidebar.text_input("基金持仓 CSV 路径", value=str(DEFAULT_CSV_PATH))
+    csv_input_path = st.sidebar.text_input("基金持仓文件路径 (Excel/CSV)", value=str(get_latest_data_file()))
 
     if not os.path.exists(csv_input_path):
-        st.error(f"指定的 CSV 文件路径不存在: {csv_input_path}")
+        st.error(f"指定的文件路径不存在: {csv_input_path}")
         st.stop()
 
     if st.sidebar.button("🔄 重新分析持仓 / Refresh Analysis"):
@@ -262,6 +328,10 @@ def main() -> None:
         data = load_and_analyze_data(csv_input_path)
     except Exception as e:
         st.warning(f"⚠️ 无法解析持仓文件或数据为空: {e}")
+        st.stop()
+
+    if not data or 'df_funds' not in data:
+        st.warning("⚠️ 无法解析持仓文件或数据为空")
         st.stop()
 
     # Extract results
@@ -275,13 +345,14 @@ def main() -> None:
     prospect_res = data['prospect_res']
     rebalance_res = data['rebalance_res']
     health_res = data['health_res']
+    alpha_beta_res = data.get('alpha_beta_res', {})
 
     # --- Render 5 Major View Tabs ---
     tab1, tab2, tab3, tab4, tab5 = st.tabs([
         "🏥 1. 全景诊断结论 (C位)",
         "🔍 2. 静态防抱团穿透",
-        "🎯 3. 真实风格与言行一致",
-        "🛡️ 4. 尾部防御与性价比算盘",
+        "🎯 3. 真实风格与 CAPM 绩效归因",
+        "🛡️ 4. 尾部防御与极值亏损模拟",
         "⚖️ 5. 智能导航与调仓指南"
     ])
 
@@ -310,44 +381,39 @@ def main() -> None:
         col_m5.metric("滚动持有期胜率", f"{win_rate*100:.1f}%")
 
         st.markdown("---")
+        st.markdown("##### 🔍 交互式持仓穿透图谱 (点击色块下钻到底层资产)")
+        fig_treemap = create_portfolio_treemap(pbsa_res.get('drilldown_data', []))
+        if fig_treemap:
+            st.plotly_chart(fig_treemap, width="stretch")
+            
+        st.markdown("---")
         st.markdown("##### 📁 个人持有基金明细列表")
-        st.dataframe(df_funds, use_container_width=True)
+        st.dataframe(df_funds, width="stretch")
 
     # ==================== Tab 2: 静态防抱团穿透 ====================
     with tab2:
         render_vernacular_callout("PBSA")
 
-        col_p1, col_p2 = st.columns([6, 5])
+        col_p1, col_p2 = st.columns([5, 6])
 
         with col_p1:
-            fig_overlap = create_overlap_heatmap(pbsa_res.get('overlap_matrix'))
-            st.plotly_chart(fig_overlap, use_container_width=True)
+            # 穿透前：4大隔离宏观资产配置占比
+            fig_macro = create_macro_asset_pie(pbsa_res.get('macro_asset_weights'))
+            st.plotly_chart(fig_macro, width="stretch")
+
+            # 穿透后：100% 重归一化股票行业占比
+            fig_sec = create_sector_pie(pbsa_res.get('sector_weights'), renormalized=True)
+            st.plotly_chart(fig_sec, width="stretch")
 
         with col_p2:
-            st.markdown("##### 📊 大类行业穿透占比 (%)")
-            sector_weights = pbsa_res.get('sector_weights')
-            if sector_weights is not None and not sector_weights.empty:
-                df_sec = pd.DataFrame({
-                    '大类行业': sector_weights.index,
-                    '每百元持仓金额 (元)': sector_weights.values
-                })
-                fig_sec = px.pie(
-                    df_sec,
-                    names='大类行业',
-                    values='每百元持仓金额 (元)',
-                    title="5大通俗行业穿透占比",
-                    color_discrete_sequence=px.colors.qualitative.Pastel
-                )
-                fig_sec.update_layout(height=400, margin=dict(l=40, r=40, t=60, b=40))
-                st.plotly_chart(fig_sec, use_container_width=True)
-            else:
-                st.info("暂无行业穿透数据")
+            fig_overlap = create_overlap_heatmap(pbsa_res.get('overlap_matrix'))
+            st.plotly_chart(fig_overlap, width="stretch")
 
         st.markdown("---")
         st.markdown("##### 🔝 底层穿透前十大重仓股明细")
         render_top_stocks_table(pbsa_res.get('top_stocks'), top_n=10)
 
-    # ==================== Tab 3: 真实风格画像与言行一致性 ====================
+    # ==================== Tab 3: 真实风格与 CAPM 绩效归因 ====================
     with tab3:
         render_vernacular_callout("RBSA")
         render_vernacular_callout("Rolling_RBSA")
@@ -356,14 +422,17 @@ def main() -> None:
 
         with col_r1:
             fig_radar = create_style_radar(rbsa_res)
-            st.plotly_chart(fig_radar, use_container_width=True)
+            st.plotly_chart(fig_radar, width="stretch")
 
             r2_val = rbsa_res.get('r_squared', 0.0)
-            st.info(f"📌 风格回归拟合优度 R²: **{r2_val:.2f}** (R² 越接近 1.0，说明风格拟合越准确)")
+            if r2_val < 0.6:
+                st.warning(f"⚠️ 风格回归拟合优度 R²: **{r2_val:.2f}**。由于低于0.6，说明当前组合有大量特异性收益未被5大基准因子解释，风格画像可能存在一定偏差。")
+            else:
+                st.success(f"✅ 风格回归拟合优度 R²: **{r2_val:.2f}** (R² 越接近 1.0，说明风格拟合越准确)")
 
         with col_r2:
             fig_drift = create_style_drift_line(rolling_res.get('rolling_series'))
-            st.plotly_chart(fig_drift, use_container_width=True)
+            st.plotly_chart(fig_drift, width="stretch")
 
             drift_warn = rolling_res.get('drift_warning', False)
             if drift_warn:
@@ -371,19 +440,76 @@ def main() -> None:
             else:
                 st.success("✅ 组合风格在监测窗口内保持相对平稳，言行一致性良好。")
 
-    # ==================== Tab 4: 尾部防御与胜率赔率 ====================
+        st.markdown("---")
+        st.markdown("##### 📊 CAPM 绩效归因与 Alpha / Beta 收益回归")
+
+        alpha_val = float(alpha_beta_res.get('portfolio_alpha', 0.0))
+        beta_val = float(alpha_beta_res.get('portfolio_beta', 1.0))
+        sharpe_val = float(alpha_beta_res.get('sharpe_ratio', 0.0))
+        treynor_val = float(alpha_beta_res.get('treynor_ratio', 0.0))
+        ir_val = float(alpha_beta_res.get('information_ratio', 0.0))
+        te_val = float(alpha_beta_res.get('tracking_error', 0.0))
+
+        col_ab1, col_ab2, col_ab3, col_ab4, col_ab5, col_ab6 = st.columns(6)
+        col_ab1.metric("Alpha (年化超额)", f"{alpha_val * 100:.2f}%")
+        col_ab2.metric("Beta (市场敏感度)", f"{beta_val:.2f}")
+        col_ab3.metric("Sharpe (夏普比率)", f"{sharpe_val:.2f}")
+        col_ab4.metric("Treynor (特雷诺比率)", f"{treynor_val:.2f}")
+        col_ab5.metric("Information Ratio (信息比率)", f"{ir_val:.2f}")
+        col_ab6.metric("Tracking Error (跟踪误差)", f"{te_val * 100:.2f}%")
+
+        fig_ab_scatter = create_alpha_beta_scatter(
+            scatter_data=alpha_beta_res.get('scatter_data', []),
+            alpha=alpha_val,
+            beta=beta_val
+        )
+        if fig_ab_scatter:
+            st.plotly_chart(fig_ab_scatter, width="stretch")
+
+    # ==================== Tab 4: 尾部防御与极值亏损模拟 ====================
     with tab4:
         render_vernacular_callout("CVaR")
         render_vernacular_callout("Prospect_Theory")
 
+        cvar_95_val = float(cvar_res.get('cvar_95', 0.0))
+        cvar_99_val = float(cvar_res.get('cvar_99', 0.0))
+
+        # Dynamic risk score and risk profile category
+        risk_score = float(np.clip(cvar_95_val * 400.0, 0.0, 100.0))
+        if cvar_95_val < 0.05:
+            risk_level = "保守型"
+        elif cvar_95_val < 0.15:
+            risk_level = "稳健型"
+        else:
+            risk_level = "积极型"
+
+        # 1. Render Portfolio Risk Gauge Chart & Retail Investor Profile Card
+        col_rg1, col_rg2 = st.columns([5, 7])
+        with col_rg1:
+            fig_gauge = create_risk_gauge_chart(risk_score=risk_score, risk_level=risk_level)
+            if fig_gauge:
+                st.plotly_chart(fig_gauge, width="stretch")
+        with col_rg2:
+            render_risk_profile_card(
+                risk_profile=risk_level,
+                cvar_95=cvar_95_val,
+                max_drawdown=cvar_res.get('max_drawdown', 0.0)
+            )
+
+        st.markdown("---")
+
+        # 2. Render RMB Loss Simulation Cards
+        render_rmb_loss_simulation(portfolio_value=total_value, cvar_95=cvar_95_val, cvar_99=cvar_99_val)
+
+        st.markdown("---")
+
+        # 3. Stress Test Bar Chart & Prospect Theory Bubble Chart
         col_c1, col_c2 = st.columns([6, 6])
 
         with col_c1:
             fig_stress = create_cvar_stress_bar(cvar_res.get('stress_results'))
-            st.plotly_chart(fig_stress, use_container_width=True)
+            st.plotly_chart(fig_stress, width="stretch")
 
-            cvar_95_val = cvar_res.get('cvar_95', 0.0)
-            cvar_99_val = cvar_res.get('cvar_99', 0.0)
             st.markdown(
                 f"""
                 - **95% 置信度 CVaR (日预期尾部亏损)**: `{cvar_95_val*100:.2f}%` (约损失 ¥ `{cvar_95_val*total_value:,.2f}` 元)
@@ -398,7 +524,7 @@ def main() -> None:
             omega = prospect_res.get('omega_ratio', 1.0)
 
             fig_prospect = create_prospect_bubble(w_rate, p_ratio, p_utility, omega)
-            st.plotly_chart(fig_prospect, use_container_width=True)
+            st.plotly_chart(fig_prospect, width="stretch")
 
             st.markdown(
                 f"""
@@ -415,7 +541,7 @@ def main() -> None:
 
         with col_b1:
             fig_reb = create_rebalance_bar(rebalance_res.get('trade_actions'))
-            st.plotly_chart(fig_reb, use_container_width=True)
+            st.plotly_chart(fig_reb, width="stretch")
 
         with col_b2:
             render_rebalance_guide(rebalance_res)

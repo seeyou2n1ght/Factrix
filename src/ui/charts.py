@@ -14,6 +14,13 @@ import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
 import plotly.express as px
+import plotly.io as pio
+
+# Set premium global chart template
+pio.templates["custom_premium"] = pio.templates["plotly_white"]
+pio.templates["custom_premium"].layout.font.family = "Inter, -apple-system, sans-serif"
+pio.templates["custom_premium"].layout.title.font.family = "Inter, -apple-system, sans-serif"
+pio.templates.default = "custom_premium"
 
 FACTOR_CHINESE_LABELS: Dict[str, str] = {
     'large_value': '大盘价值',
@@ -22,6 +29,37 @@ FACTOR_CHINESE_LABELS: Dict[str, str] = {
     'small_growth': '小盘成长',
     'bond_index': '国债指数'
 }
+
+# 5 Broad Sectors + 其他 Color Palette (Vibrant Premium Colors)
+SECTOR_COLORS: Dict[str, str] = {
+    '科技制造': '#3b82f6',  # Bright Blue
+    '大消费': '#f43f5e',    # Vibrant Rose
+    '医药健康': '#10b981',  # Emerald
+    '大金融': '#8b5cf6',    # Violet
+    '周期资源': '#f59e0b',  # Amber
+    '其他': '#94a3b8',      # Slate
+}
+
+# 4 Macro Asset Classes Color Palette
+MACRO_ASSET_COLORS: Dict[str, str] = {
+    '股票资产': '#2563eb',  # Royal Blue
+    '债券资产': '#059669',  # Dark Emerald
+    '现金货基': '#d97706',  # Dark Amber
+    '其他资产': '#64748b',  # Slate
+    '商品/其他': '#64748b',
+    'Equity': '#2563eb',
+    'Fixed Income': '#059669',
+    'Commodity': '#64748b',
+    'Cash': '#d97706',
+}
+
+MACRO_LABEL_MAP: Dict[str, str] = {
+    'Equity': '股票资产',
+    'Fixed Income': '债券资产',
+    'Commodity': '商品/其他',
+    'Cash': '现金货基',
+}
+
 
 
 def _create_empty_figure(title: str, message: str = "暂无有效数据") -> go.Figure:
@@ -75,7 +113,12 @@ def create_overlap_heatmap(overlap_df: pd.DataFrame) -> go.Figure:
         y=fund_codes,
         hoverinfo="text",
         text=hover_text,
-        colorscale="YlOrRd",
+        colorscale=[
+            [0.0, '#f8fafc'],
+            [0.25, '#fef08a'],
+            [0.6, '#f97316'],
+            [1.0, '#dc2626'],
+        ],
         zmin=0.0,
         zmax=1.0,
         colorbar=dict(
@@ -95,6 +138,96 @@ def create_overlap_heatmap(overlap_df: pd.DataFrame) -> go.Figure:
     )
 
     return fig
+
+
+def create_macro_asset_pie(macro_dict: Union[Dict[str, float], pd.Series]) -> go.Figure:
+    """Create 4 Macro Asset Classes Donut Chart (Before Penetration).
+
+    Args:
+        macro_dict: Dict or pd.Series mapping macro asset names to percentage in [0, 100].
+
+    Returns:
+        plotly.graph_objects.Figure instance.
+    """
+    if macro_dict is None:
+        return _create_empty_figure("4大隔离宏观资产配置比例 (穿透前)")
+    if isinstance(macro_dict, pd.Series):
+        if macro_dict.empty:
+            return _create_empty_figure("4大隔离宏观资产配置比例 (穿透前)")
+        data_dict = macro_dict.to_dict()
+    elif isinstance(macro_dict, dict):
+        if not macro_dict:
+            return _create_empty_figure("4大隔离宏观资产配置比例 (穿透前)")
+        data_dict = macro_dict
+    else:
+        return _create_empty_figure("4大隔离宏观资产配置比例 (穿透前)")
+
+    raw_labels = list(data_dict.keys())
+    labels = [MACRO_LABEL_MAP.get(lbl, lbl) for lbl in raw_labels]
+    values = [float(v) for v in data_dict.values()]
+    colors = [MACRO_ASSET_COLORS.get(lbl, MACRO_ASSET_COLORS.get(raw_lbl, '#64748b')) for lbl, raw_lbl in zip(labels, raw_labels)]
+
+    fig = go.Figure(data=[go.Pie(
+        labels=labels,
+        values=values,
+        hole=0.52,
+        marker=dict(colors=colors, line=dict(color='#ffffff', width=2)),
+        textinfo='label+percent',
+        hovertemplate="<b>%{label}</b><br>占比: %{percent:.1%}<br>权重: %{value:.2f}%<extra></extra>"
+    )])
+
+    fig.update_layout(
+        title=dict(text="📦 穿透前：4大隔离宏观资产配置占比", font=dict(size=15, color="#0f172a")),
+        legend=dict(orientation="h", yanchor="bottom", y=-0.15, xanchor="center", x=0.5),
+        height=400,
+        margin=dict(l=30, r=30, t=50, b=50),
+        template="plotly_white"
+    )
+    return fig
+
+
+def create_sector_pie(sector_series: pd.Series, renormalized: bool = True) -> go.Figure:
+    """Create 5 Broad Stock Sectors Donut Chart (100% Re-normalized After Penetration).
+
+    Args:
+        sector_series: pd.Series mapping broad sector names to weights.
+        renormalized: Whether to re-normalize stock weights to sum to 100%.
+
+    Returns:
+        plotly.graph_objects.Figure instance.
+    """
+    if sector_series is None or sector_series.empty or sector_series.sum() <= 0:
+        return _create_empty_figure("100% 重归一化股票行业占比 (穿透后)")
+
+    total_val = float(sector_series.sum())
+    if renormalized:
+        values = [(float(v) / total_val) * 100.0 for v in sector_series.values]
+        title_text = "📊 穿透后：100% 重归一化股票行业占比"
+    else:
+        values = [float(v) for v in sector_series.values]
+        title_text = "📊 穿透后：股票行业占比"
+
+    labels = list(sector_series.index)
+    colors = [SECTOR_COLORS.get(lbl, '#64748b') for lbl in labels]
+
+    fig = go.Figure(data=[go.Pie(
+        labels=labels,
+        values=values,
+        hole=0.52,
+        marker=dict(colors=colors, line=dict(color='#ffffff', width=2)),
+        textinfo='label+percent',
+        hovertemplate="<b>%{label}</b><br>股票内占比: %{percent:.1%}<br>权重: %{value:.2f}%<extra></extra>"
+    )])
+
+    fig.update_layout(
+        title=dict(text=title_text, font=dict(size=15, color="#0f172a")),
+        legend=dict(orientation="h", yanchor="bottom", y=-0.15, xanchor="center", x=0.5),
+        height=400,
+        margin=dict(l=30, r=30, t=50, b=50),
+        template="plotly_white"
+    )
+    return fig
+
 
 
 def create_style_radar(style_dict: Union[Dict[str, float], Dict[str, Any]]) -> go.Figure:
@@ -183,11 +316,11 @@ def create_style_drift_line(rolling_df: pd.DataFrame) -> go.Figure:
     fig = go.Figure()
 
     color_map = {
-        'large_value': '#1e3a8a',   # Dark blue
-        'large_growth': '#0284c7',  # Light blue
-        'small_value': '#d97706',   # Amber
-        'small_growth': '#dc2626',  # Red
-        'bond_index': '#16a34a'     # Green
+        'large_value': '#2563eb',   # Royal blue
+        'large_growth': '#ec4899',  # Pink / Magenta
+        'small_value': '#8b5cf6',   # Purple
+        'small_growth': '#f59e0b',  # Amber
+        'bond_index': '#10b981'     # Emerald green
     }
 
     dates = rolling_df.index.tolist()
@@ -405,3 +538,186 @@ def create_rebalance_bar(trade_actions: List[Dict[str, Any]]) -> go.Figure:
     )
 
     return fig
+
+
+def create_risk_gauge_chart(risk_score: float, risk_level: str = "中风险") -> go.Figure:
+    """Create interactive Plotly indicator gauge chart for portfolio risk score (0-100).
+
+    Args:
+        risk_score: Numerical risk score between 0 and 100.
+        risk_level: Descriptive risk level string (e.g. "保守型", "中风险", "高风险").
+
+    Returns:
+        plotly.graph_objects.Figure instance.
+    """
+    title_text = "🛡️ 组合风险综合评估仪表盘"
+    if risk_score is None:
+        return _create_empty_figure(title_text)
+
+    try:
+        score_val = float(risk_score)
+        if np.isnan(score_val) or np.isinf(score_val):
+            return _create_empty_figure(title_text)
+    except (ValueError, TypeError):
+        return _create_empty_figure(title_text)
+
+    score_clamped = max(0.0, min(100.0, score_val))
+
+    if score_clamped <= 30.0:
+        bar_color = "#10b981"
+    elif score_clamped <= 70.0:
+        bar_color = "#f59e0b"
+    else:
+        bar_color = "#ef4444"
+
+    fig = go.Figure(go.Indicator(
+        mode="gauge+number",
+        value=score_clamped,
+        number={'suffix': " 分", 'font': {'size': 36, 'color': '#0f172a'}},
+        title={
+            'text': f"<b>{title_text}</b><br><span style='font-size:0.85em;color:#64748b'>风险等级: {risk_level}</span>",
+            'font': {'size': 16, 'color': '#0f172a'}
+        },
+        gauge={
+            'axis': {'range': [0, 100], 'tickwidth': 1, 'tickcolor': "#475569"},
+            'bar': {'color': bar_color, 'thickness': 0.6},
+            'bgcolor': "#f8fafc",
+            'borderwidth': 1,
+            'bordercolor': "#e2e8f0",
+            'steps': [
+                {'range': [0, 30], 'color': 'rgba(16, 185, 129, 0.2)'},
+                {'range': [30, 70], 'color': 'rgba(245, 158, 11, 0.2)'},
+                {'range': [70, 100], 'color': 'rgba(239, 68, 68, 0.2)'},
+            ],
+            'threshold': {
+                'line': {'color': '#0f172a', 'width': 4},
+                'thickness': 0.75,
+                'value': score_clamped,
+            },
+        }
+    ))
+
+    fig.update_layout(
+        height=380,
+        margin=dict(l=40, r=40, t=60, b=40),
+        template="plotly_white",
+    )
+    return fig
+
+
+def create_alpha_beta_scatter(
+    scatter_data: List[Dict[str, Any]],
+    alpha: float = 0.0,
+    beta: float = 1.0
+) -> go.Figure:
+    """Create Scatter Plot of Portfolio Returns vs Benchmark Returns with OLS Regression Line.
+
+    Args:
+        scatter_data: List of dicts containing 'market_return' and 'portfolio_return'.
+        alpha: Annualized Jensen's Alpha (float).
+        beta: Portfolio Beta relative to benchmark (float).
+
+    Returns:
+        plotly.graph_objects.Figure instance.
+    """
+    title_text = "📊 Alpha / Beta 收益回归散点图"
+    if not scatter_data or not isinstance(scatter_data, list):
+        return _create_empty_figure(title_text)
+
+    market_rets = []
+    port_rets = []
+
+    for item in scatter_data:
+        if isinstance(item, dict) and 'market_return' in item and 'portfolio_return' in item:
+            try:
+                m_ret = float(item['market_return'])
+                p_ret = float(item['portfolio_return'])
+                if not (np.isnan(m_ret) or np.isnan(p_ret) or np.isinf(m_ret) or np.isinf(p_ret)):
+                    market_rets.append(m_ret)
+                    port_rets.append(p_ret)
+            except (ValueError, TypeError):
+                continue
+
+    if not market_rets or not port_rets or len(market_rets) != len(port_rets):
+        return _create_empty_figure(title_text)
+
+    m_pcts = [m * 100.0 for m in market_rets]
+    p_pcts = [p * 100.0 for p in port_rets]
+
+    fig = go.Figure()
+
+    fig.add_trace(go.Scatter(
+        x=m_pcts,
+        y=p_pcts,
+        mode='markers',
+        name='日收益率对',
+        marker=dict(
+            size=7,
+            color='#2563eb',
+            opacity=0.6,
+            line=dict(width=1, color='#1e40af')
+        ),
+        hovertemplate="基准日收益率: %{x:.2f}%<br>组合日收益率: %{y:.2f}%<extra></extra>"
+    ))
+
+    x_min, x_max = min(m_pcts), max(m_pcts)
+    x_range = np.linspace(x_min, x_max, 100)
+
+    try:
+        alpha_val = float(alpha) if alpha is not None else 0.0
+        if np.isnan(alpha_val) or np.isinf(alpha_val):
+            alpha_val = 0.0
+    except (ValueError, TypeError):
+        alpha_val = 0.0
+
+    try:
+        beta_val = float(beta) if beta is not None else 1.0
+        if np.isnan(beta_val) or np.isinf(beta_val):
+            beta_val = 1.0
+    except (ValueError, TypeError):
+        beta_val = 1.0
+
+    alpha_daily = alpha_val / 252.0
+    y_range = [beta_val * x + alpha_daily * 100.0 for x in x_range]
+
+    fig.add_trace(go.Scatter(
+        x=x_range,
+        y=y_range,
+        mode='lines',
+        name='OLS 回归线',
+        line=dict(color='#ef4444', width=2.5, dash='solid'),
+        hovertemplate="拟合线 (Beta=%{customdata[0]:.2f}): y = %{y:.2f}%<extra></extra>",
+        customdata=[[beta_val]] * len(x_range)
+    ))
+
+    annotation_text = (
+        f"<b>回归分析指标:</b><br>"
+        f"年化 Alpha: <b>{alpha_val * 100.0:.2f}%</b><br>"
+        f"贝塔 Beta: <b>{beta_val:.2f}</b>"
+    )
+
+    fig.add_annotation(
+        xref="paper", yref="paper",
+        x=0.03, y=0.95,
+        text=annotation_text,
+        showarrow=False,
+        align="left",
+        bgcolor="rgba(255, 255, 255, 0.85)",
+        bordercolor="#cbd5e1",
+        borderwidth=1,
+        borderpad=8,
+        font=dict(size=12, color="#0f172a")
+    )
+
+    fig.update_layout(
+        title=dict(text=f"<b>{title_text}</b>", font=dict(size=16, color="#0f172a")),
+        xaxis=dict(title="基准日收益率 (%)", showgrid=True, gridcolor="#f1f5f9", ticksuffix="%"),
+        yaxis=dict(title="组合日收益率 (%)", showgrid=True, gridcolor="#f1f5f9", ticksuffix="%"),
+        height=420,
+        margin=dict(l=50, r=40, t=60, b=50),
+        template="plotly_white",
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+    )
+
+    return fig
+

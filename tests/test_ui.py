@@ -17,14 +17,20 @@ from src.ui.components import (
     render_health_score_card,
     render_rebalance_guide,
     render_top_stocks_table,
+    render_risk_profile_card,
+    render_rmb_loss_simulation,
 )
 from src.ui.charts import (
     create_overlap_heatmap,
+    create_macro_asset_pie,
+    create_sector_pie,
     create_style_radar,
     create_style_drift_line,
     create_cvar_stress_bar,
     create_prospect_bubble,
     create_rebalance_bar,
+    create_risk_gauge_chart,
+    create_alpha_beta_scatter,
 )
 import app
 
@@ -101,6 +107,41 @@ def test_create_overlap_heatmap():
     assert isinstance(fig_empty, go.Figure)
 
 
+def test_create_macro_asset_pie():
+    """Verify create_macro_asset_pie returns a valid go.Figure for both dict and native PBSA pd.Series inputs."""
+    macro_dict = {
+        "股票资产": 75.0,
+        "债券资产": 15.0,
+        "现金货基": 6.0,
+        "其他资产": 4.0,
+    }
+    fig = create_macro_asset_pie(macro_dict)
+    assert isinstance(fig, go.Figure)
+
+    macro_series = pd.Series({"Equity": 80.0, "Fixed Income": 10.0, "Commodity": 5.0, "Cash": 5.0})
+    fig_series = create_macro_asset_pie(macro_series)
+    assert isinstance(fig_series, go.Figure)
+
+    fig_empty = create_macro_asset_pie({})
+    assert isinstance(fig_empty, go.Figure)
+
+
+def test_create_sector_pie():
+    """Verify create_sector_pie returns a valid go.Figure."""
+    sec_series = pd.Series({
+        "科技制造": 35.0,
+        "大消费": 25.0,
+        "医药健康": 20.0,
+        "大金融": 10.0,
+        "周期资源": 10.0,
+    })
+    fig = create_sector_pie(sec_series, renormalized=True)
+    assert isinstance(fig, go.Figure)
+
+    fig_empty = create_sector_pie(pd.Series(dtype=float))
+    assert isinstance(fig_empty, go.Figure)
+
+
 def test_create_style_radar():
     """Verify create_style_radar returns a valid go.Figure."""
     style_dict = {
@@ -174,6 +215,40 @@ def test_create_rebalance_bar():
     assert isinstance(fig_empty, go.Figure)
 
 
+def test_render_risk_profile_card():
+    """Verify render_risk_profile_card runs safely for various profile types and edge cases."""
+    render_risk_profile_card(risk_profile="保守型", cvar_95=0.04, max_drawdown=0.07)
+    render_risk_profile_card(risk_profile="稳健型", cvar_95=0.12, max_drawdown=0.15)
+    render_risk_profile_card(risk_profile="积极型", cvar_95=0.22, max_drawdown=0.28)
+    render_risk_profile_card(risk_profile=None, cvar_95=None, max_drawdown=None)
+
+
+def test_render_rmb_loss_simulation():
+    """Verify render_rmb_loss_simulation runs safely for valid and edge case inputs."""
+    render_rmb_loss_simulation(portfolio_value=100000.0, cvar_95=0.08, cvar_99=0.15)
+    render_rmb_loss_simulation(portfolio_value=0.0, cvar_95=0.0, cvar_99=0.0)
+    render_rmb_loss_simulation(portfolio_value=None, cvar_95=None, cvar_99=None)
+
+
+def test_create_risk_gauge_chart():
+    """Verify create_risk_gauge_chart returns a valid go.Figure."""
+    fig = create_risk_gauge_chart(risk_score=55.0, risk_level="稳健型")
+    assert isinstance(fig, go.Figure)
+
+    fig_empty = create_risk_gauge_chart(risk_score=None)
+    assert isinstance(fig_empty, go.Figure)
+
+
+def test_create_alpha_beta_scatter():
+    """Verify create_alpha_beta_scatter returns a valid go.Figure."""
+    data = [{"market_return": 0.01, "portfolio_return": 0.012}]
+    fig = create_alpha_beta_scatter(data, alpha=0.02, beta=1.05)
+    assert isinstance(fig, go.Figure)
+
+    fig_empty = create_alpha_beta_scatter([])
+    assert isinstance(fig_empty, go.Figure)
+
+
 # --- Test App Main Integration ---
 
 def test_app_import():
@@ -183,7 +258,7 @@ def test_app_import():
 
 
 def test_app_load_and_analyze_data(sample_fundlist_path: str):
-    """Verify app.load_and_analyze_data parses sample CSV and computes 7 engine results."""
+    """Verify app.load_and_analyze_data parses sample CSV and computes all engine results including AlphaBetaEngine."""
     res = app.load_and_analyze_data(sample_fundlist_path)
 
     assert "df_funds" in res
@@ -195,6 +270,7 @@ def test_app_load_and_analyze_data(sample_fundlist_path: str):
     assert "prospect_res" in res
     assert "rebalance_res" in res
     assert "health_res" in res
+    assert "alpha_beta_res" in res
 
     # Verify Health score output
     health_res = res["health_res"]
@@ -202,3 +278,21 @@ def test_app_load_and_analyze_data(sample_fundlist_path: str):
     assert 0 <= health_res["total_score"] <= 100
     assert "level" in health_res
     assert "summary_text" in health_res
+
+    # Verify AlphaBetaEngine output and required keys
+    ab_res = res["alpha_beta_res"]
+    assert "portfolio_alpha" in ab_res
+    assert "portfolio_beta" in ab_res
+    assert "sharpe_ratio" in ab_res
+    assert "scatter_data" in ab_res
+    assert isinstance(ab_res["scatter_data"], list)
+
+
+def test_app_alpha_beta_res_keys(sample_fundlist_path: str):
+    """Ensure alpha_beta_res is returned in load_and_analyze_data output with required keys."""
+    res = app.load_and_analyze_data(sample_fundlist_path)
+    assert "alpha_beta_res" in res
+    ab_res = res["alpha_beta_res"]
+    for key in ["portfolio_alpha", "portfolio_beta", "sharpe_ratio", "scatter_data"]:
+        assert key in ab_res, f"Required key '{key}' missing from alpha_beta_res dict"
+

@@ -94,6 +94,20 @@ class SQLiteStorage:
         """)
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_benchmark_nav_code_date ON benchmark_nav(code, date);")
 
+        # 4. fund_industry_allocation
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS fund_industry_allocation (
+                fund_code TEXT NOT NULL,
+                report_date TEXT NOT NULL DEFAULT '',
+                industry_name TEXT NOT NULL,
+                weight REAL NOT NULL DEFAULT 0.0,
+                market_value REAL NOT NULL DEFAULT 0.0,
+                broad_sector TEXT NOT NULL DEFAULT '',
+                PRIMARY KEY (fund_code, report_date, industry_name)
+            );
+        """)
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_fund_industry_code ON fund_industry_allocation(fund_code);")
+
         conn.commit()
 
 
@@ -289,18 +303,90 @@ class SQLiteStorage:
         df = pd.read_sql_query(query, conn, params=params)
         return df
 
+    # --- Industry Allocation Operations ---
+
+    def save_industry_allocation(self, fund_code: str, df: pd.DataFrame, report_date: str = "") -> None:
+        """Save fund industry allocation data into SQLite database.
+
+        Args:
+            fund_code: 6-digit fund code.
+            df: DataFrame with columns ['industry_name', 'weight'].
+                May optionally contain ['market_value', 'broad_sector', 'report_date'].
+            report_date: Optional report date override string.
+        """
+        if df is None or df.empty:
+            return
+        fund_code_clean = str(fund_code).zfill(6)
+        df_to_save = df.copy()
+        df_to_save['fund_code'] = fund_code_clean
+        if 'report_date' not in df_to_save.columns or not df_to_save['report_date'].any():
+            df_to_save['report_date'] = report_date or ''
+
+        for col in ['market_value', 'weight']:
+            if col not in df_to_save.columns:
+                df_to_save[col] = 0.0
+        for col in ['broad_sector', 'industry_name']:
+            if col not in df_to_save.columns:
+                df_to_save[col] = ''
+
+        df_to_save = df_to_save[['fund_code', 'report_date', 'industry_name', 'weight', 'market_value', 'broad_sector']]
+
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        records = [
+            (
+                str(row['fund_code']),
+                str(row['report_date']),
+                str(row['industry_name']),
+                float(row['weight']),
+                float(row['market_value']),
+                str(row['broad_sector'])
+            )
+            for _, row in df_to_save.iterrows()
+        ]
+        cursor.executemany("""
+            INSERT OR REPLACE INTO fund_industry_allocation
+            (fund_code, report_date, industry_name, weight, market_value, broad_sector)
+            VALUES (?, ?, ?, ?, ?, ?)
+        """, records)
+        conn.commit()
+
+    def get_industry_allocation(self, fund_code: str, report_date: Optional[str] = None) -> pd.DataFrame:
+        """Query cached fund industry allocation data from database.
+
+        Args:
+            fund_code: 6-digit fund code.
+            report_date: Optional specific report date.
+
+        Returns:
+            DataFrame with columns ['industry_name', 'weight', 'market_value', 'broad_sector', 'report_date'].
+        """
+        fund_code_clean = str(fund_code).zfill(6)
+        conn = self.get_connection()
+        query = "SELECT industry_name, weight, market_value, broad_sector, report_date FROM fund_industry_allocation WHERE fund_code = ?"
+        params = [fund_code_clean]
+
+        if report_date:
+            query += " AND report_date = ?"
+            params.append(report_date)
+
+        query += " ORDER BY weight DESC"
+
+        df = pd.read_sql_query(query, conn, params=params)
+        return df
+
     # --- Cache Management ---
 
     def clear_cache(self, table_name: Optional[str] = None) -> None:
         """Clear cached data from database tables.
 
         Args:
-            table_name: Table to clear ('fund_nav', 'fund_holdings', 'benchmark_nav').
+            table_name: Table to clear ('fund_nav', 'fund_holdings', 'benchmark_nav', 'fund_industry_allocation').
                 If None, clears all tables.
         """
         conn = self.get_connection()
         cursor = conn.cursor()
-        tables = [table_name] if table_name else ['fund_nav', 'fund_holdings', 'benchmark_nav']
+        tables = [table_name] if table_name else ['fund_nav', 'fund_holdings', 'benchmark_nav', 'fund_industry_allocation']
         for tbl in tables:
             cursor.execute(f"DELETE FROM {tbl};")
         conn.commit()
@@ -310,3 +396,5 @@ class SQLiteStorage:
     get_nav_cache = get_nav
     save_holdings_cache = save_holdings
     get_holdings_cache = get_holdings
+    save_industry_allocation_cache = save_industry_allocation
+    get_industry_allocation_cache = get_industry_allocation

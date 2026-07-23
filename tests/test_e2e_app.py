@@ -27,6 +27,7 @@ from src.engine.cvar_stress import CVaRStressEngine
 from src.engine.prospect_theory import ProspectTheoryEngine
 from src.engine.rebalance import RebalanceEngine
 from src.engine.health_score import HealthScoreEngine
+from src.engine.alpha_beta import AlphaBetaEngine
 
 
 # Helper function to generate mock NAV DataFrames with specified returns
@@ -417,6 +418,17 @@ def test_tc_t4_01_full_portfolio_analysis_e2e(mock_fund_nav_df_dict, mock_benchm
         pbsa_res, rbsa_res, rolling_res, cvar_res, prospect_res, rebalance_res
     )
     assert 0 <= health_res["total_score"] <= 100
+
+    # 8. AlphaBeta Engine
+    alpha_beta_res = AlphaBetaEngine.calculate(
+        nav_df_dict=mock_fund_nav_df_dict,
+        market_benchmark_df=mock_benchmark_nav_df,
+        fund_market_values=fund_market_values
+    )
+    assert "portfolio_alpha" in alpha_beta_res
+    assert "portfolio_beta" in alpha_beta_res
+    assert "sharpe_ratio" in alpha_beta_res
+    assert "scatter_data" in alpha_beta_res
 
     t_elapsed = time.time() - t_start
     assert t_elapsed < 3.0, f"Full E2E pipeline took {t_elapsed:.2f}s, exceeding 3.0s threshold!"

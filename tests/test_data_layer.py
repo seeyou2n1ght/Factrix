@@ -321,3 +321,64 @@ def test_fund_fetcher_imputation_and_missing_data(tmp_path: Path):
     assert cleaned['nav'].tolist() == [1.0, 1.0, 1.1, 1.1]
     assert not cleaned['daily_return'].isna().any()
     assert pytest.approx(cleaned['daily_return'].iloc[2]) == (1.1 - 1.0) / 1.0
+
+
+def test_csrc_sector_category_mapping():
+    """Test CSRC 19 industry category mapping in config."""
+    assert get_sector_category("制造业") == "科技制造"
+    assert get_sector_category("金融业") == "大金融"
+    assert get_sector_category("卫生和社会工作") == "医药健康"
+    assert get_sector_category("农林牧渔业") == "大消费"
+    assert get_sector_category("采矿业") == "周期资源"
+    assert get_sector_category("信息传输、软件和信息技术服务业") == "科技制造"
+
+
+def test_sqlite_storage_industry_allocation(tmp_path: Path):
+    """Test SQLiteStorage industry allocation table saving, getting, and clearing."""
+    db_file = tmp_path / "test_ind_storage.db"
+    with SQLiteStorage(db_path=db_file) as storage:
+        df_ind = pd.DataFrame({
+            'industry_name': ['制造业', '金融业'],
+            'weight': [0.60, 0.20],
+            'market_value': [6000.0, 2000.0],
+            'broad_sector': ['科技制造', '大金融']
+        })
+        storage.save_industry_allocation('000198', df_ind, report_date='2026-06-30')
+
+        cached = storage.get_industry_allocation('000198')
+        assert len(cached) == 2
+        assert cached['industry_name'].iloc[0] == '制造业'
+        assert cached['broad_sector'].iloc[0] == '科技制造'
+
+        storage.clear_cache('fund_industry_allocation')
+        assert storage.get_industry_allocation('000198').empty
+
+
+def test_fund_fetcher_industry_allocation(tmp_path: Path, monkeypatch):
+    """Test FundFetcher industry allocation fetching with cache hit and miss."""
+    db_file = tmp_path / "test_ind_fetcher.db"
+    fetcher = FundFetcher(db_path=db_file)
+
+    calls = {'count': 0}
+
+    def mock_fetch_ind(fund_code):
+        calls['count'] += 1
+        return pd.DataFrame({
+            '行业类别': ['制造业', '金融业'],
+            '占净值比例': ['55.0%', '15.0%'],
+            '市值': [5500.0, 1500.0]
+        })
+
+    monkeypatch.setattr(fetcher, '_fetch_akshare_industry_allocation', mock_fetch_ind)
+
+    # First call: Cache miss
+    df1 = fetcher.get_fund_industry_allocation('000198')
+    assert len(df1) == 2
+    assert calls['count'] == 1
+    assert df1['broad_sector'].iloc[0] == '科技制造'
+
+    # Second call: Cache hit
+    df2 = fetcher.get_fund_industry_allocation('000198')
+    assert len(df2) == 2
+    assert calls['count'] == 1
+

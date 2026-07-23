@@ -15,6 +15,8 @@ from src.engine.cvar_stress import CVaRStressEngine
 from src.engine.prospect_theory import ProspectTheoryEngine
 from src.engine.rebalance import RebalanceEngine
 from src.engine.health_score import HealthScoreEngine
+from src.engine.alpha_beta import AlphaBetaEngine
+
 
 
 # --- Helper Data Generators ---
@@ -51,6 +53,7 @@ def test_pbsa_engine_normal(mock_holdings_df_dict):
 
     assert not stock_w.empty
     assert len(sector_w) == 6  # 5 broad categories + 其他
+    assert pytest.approx(sector_w.sum(), 0.01) == 100.0
     assert overlap_m.shape == (3, 3)
 
     # Check matrix diagonal is 1.0
@@ -89,6 +92,41 @@ def test_pbsa_engine_boundary_empty():
     res = PBSAEngine.calculate({}, {})
     assert res["stock_weights"].empty
     assert res["overlap_matrix"].empty
+
+
+def test_pbsa_engine_macro_asset_and_industry_renormalization():
+    """Test 4 macro asset class isolation, industry re-normalization, and 'Other' < 15%."""
+    holdings_dict = {
+        "000001": pd.DataFrame([
+            {"stock_code": "600519", "stock_name": "茅台", "weight": 0.08, "sector": "食品饮料"},
+            {"stock_code": "300750", "stock_name": "宁德", "weight": 0.07, "sector": "电力设备"}
+        ])
+    }
+    industry_dict = {
+        "000001": pd.DataFrame([
+            {"industry_name": "制造业", "weight": 60.0},
+            {"industry_name": "金融业", "weight": 20.0},
+            {"industry_name": "卫生和社会工作", "weight": 10.0}
+        ])
+    }
+    fund_types = {"000001": "混合型"}
+    market_vals = {"000001": 10000.0}
+
+    res = PBSAEngine.calculate(holdings_dict, market_vals, industry_dict=industry_dict, fund_types=fund_types)
+
+    assert "macro_asset_weights" in res
+    macro = res["macro_asset_weights"]
+    assert set(macro.index) == {"Equity", "Fixed Income", "Commodity", "Cash"}
+    assert pytest.approx(macro.sum(), 0.01) == 100.0
+    assert macro["Equity"] == 90.0
+    assert macro["Cash"] == 10.0
+
+    sector_w = res["sector_weights"]
+    assert len(sector_w) == 6
+    # '其他' must be strictly below 15%
+    assert sector_w["其他"] < 15.0
+    assert pytest.approx(sector_w.sum(), 0.01) == 100.0
+    assert pytest.approx(sector_w["科技制造"] + sector_w["大金融"] + sector_w["医药健康"], 0.01) == 100.0
 
 
 def test_map_broad_sector():
@@ -274,3 +312,22 @@ def test_health_score_engine_normal(mock_fund_nav_df_dict, mock_benchmark_nav_df
     assert res["level"] in ["优", "良", "中", "需保养"]
     assert len(res["summary_text"]) > 10
     assert isinstance(res["key_findings"], list)
+
+
+# --- 8. Alpha Beta Engine Tests ---
+def test_alpha_beta_engine_integration(mock_fund_nav_df_dict, mock_benchmark_nav_df):
+    """Test AlphaBetaEngine with integration mock datasets."""
+    market_vals = {"000001": 50000.0, "014114": 30000.0, "001900": 20000.0}
+    res = AlphaBetaEngine.calculate(mock_fund_nav_df_dict, mock_benchmark_nav_df, market_vals)
+
+    assert "portfolio_alpha" in res
+    assert "portfolio_beta" in res
+    assert "portfolio_r2" in res
+    assert "sharpe_ratio" in res
+    assert "treynor_ratio" in res
+    assert "information_ratio" in res
+    assert "tracking_error" in res
+    assert "fund_metrics" in res
+    assert "scatter_data" in res
+    assert isinstance(res["scatter_data"], list)
+

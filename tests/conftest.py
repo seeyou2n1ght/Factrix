@@ -109,6 +109,13 @@ def memory_storage(
         storage.save_nav(code, df_nav)
     for code, df_holdings in mock_holdings_df_dict.items():
         storage.save_holdings(code, df_holdings)
+        if not df_holdings.empty and 'sector' in df_holdings.columns and 'weight' in df_holdings.columns:
+            df_ind = df_holdings.groupby('sector')['weight'].sum().reset_index()
+            df_ind = df_ind.rename(columns={'sector': 'industry_name', 'weight': 'weight'})
+            df_ind['market_value'] = 0.0
+            df_ind['broad_sector'] = df_ind['industry_name']
+            df_ind['report_date'] = '2026-06-30'
+            storage.save_industry_allocation(code, df_ind)
     yield storage
     storage.close()
 
@@ -125,8 +132,9 @@ def block_external_network(monkeypatch, mock_nav_data: Dict[str, Any], mock_hold
     funds_nav_mock = mock_nav_data.get("funds", {})
     holdings_mock = mock_holdings_data.get("holdings", mock_holdings_data)
 
-    def mock_fund_open_fund_info_em(fund: str, indicator: str = "单位净值走势", *args, **kwargs) -> pd.DataFrame:
-        fund_code = str(fund).zfill(6)
+    def mock_fund_open_fund_info_em(fund: str = None, symbol: str = None, indicator: str = "单位净值走势", *args, **kwargs) -> pd.DataFrame:
+        target_code = symbol or fund or ""
+        fund_code = str(target_code).zfill(6)
         if indicator == "单位净值走势":
             if fund_code in funds_nav_mock:
                 records = funds_nav_mock[fund_code]
@@ -148,10 +156,21 @@ def block_external_network(monkeypatch, mock_nav_data: Dict[str, Any], mock_hold
                     "sector": "申万行业"
                 })
             return pd.DataFrame()
+        elif indicator == "行业配置":
+            if fund_code in holdings_mock and isinstance(holdings_mock[fund_code], list):
+                records = holdings_mock[fund_code]
+                df = pd.DataFrame(records)
+                if not df.empty and 'sector' in df.columns and 'weight' in df.columns:
+                    df_ind = df.groupby('sector')['weight'].sum().reset_index()
+                    df_ind = df_ind.rename(columns={'sector': '行业类别', 'weight': '占净值比例'})
+                    df_ind['占净值比例'] = df_ind['占净值比例'] * 100.0
+                    return df_ind
+            return pd.DataFrame()
         return pd.DataFrame()
 
-    def mock_fund_portfolio_hold_em(symbol: str, *args, **kwargs) -> pd.DataFrame:
-        fund_code = str(symbol).zfill(6)
+    def mock_fund_portfolio_hold_em(symbol: str = None, fund: str = None, *args, **kwargs) -> pd.DataFrame:
+        target_code = symbol or fund or ""
+        fund_code = str(target_code).zfill(6)
         if fund_code in holdings_mock and isinstance(holdings_mock[fund_code], list):
             records = holdings_mock[fund_code]
             df = pd.DataFrame(records)
@@ -163,7 +182,20 @@ def block_external_network(monkeypatch, mock_nav_data: Dict[str, Any], mock_hold
             })
         return pd.DataFrame()  # Graceful empty for unmocked funds
 
-    def mock_stock_zh_index_daily_em(symbol: str, *args, **kwargs) -> pd.DataFrame:
+    def mock_fund_portfolio_industry_allocation_em(symbol: str = None, fund: str = None, *args, **kwargs) -> pd.DataFrame:
+        target_code = symbol or fund or ""
+        fund_code = str(target_code).zfill(6)
+        if fund_code in holdings_mock and isinstance(holdings_mock[fund_code], list):
+            records = holdings_mock[fund_code]
+            df = pd.DataFrame(records)
+            if not df.empty and 'sector' in df.columns and 'weight' in df.columns:
+                df_ind = df.groupby('sector')['weight'].sum().reset_index()
+                df_ind = df_ind.rename(columns={'sector': '行业类别', 'weight': '占净值比例'})
+                df_ind['占净值比例'] = df_ind['占净值比例'] * 100.0
+                return df_ind
+        return pd.DataFrame()
+
+    def mock_stock_zh_index_daily_em(symbol: str = None, fund: str = None, *args, **kwargs) -> pd.DataFrame:
         benchmarks = mock_nav_data.get("benchmarks", [])
         if benchmarks:
             df = pd.DataFrame(benchmarks)
@@ -181,6 +213,8 @@ def block_external_network(monkeypatch, mock_nav_data: Dict[str, Any], mock_hold
         import akshare as ak
         monkeypatch.setattr(ak, "fund_open_fund_info_em", mock_fund_open_fund_info_em, raising=False)
         monkeypatch.setattr(ak, "fund_portfolio_hold_em", mock_fund_portfolio_hold_em, raising=False)
+        monkeypatch.setattr(ak, "fund_portfolio_industry_allocation_em", mock_fund_portfolio_industry_allocation_em, raising=False)
+        monkeypatch.setattr(ak, "fund_portfolio_industry_allocation_cninfo", mock_fund_portfolio_industry_allocation_em, raising=False)
         monkeypatch.setattr(ak, "stock_zh_index_daily_em", mock_stock_zh_index_daily_em, raising=False)
         monkeypatch.setattr(ak, "stock_zh_index_daily", mock_stock_zh_index_daily_em, raising=False)
     except ImportError:

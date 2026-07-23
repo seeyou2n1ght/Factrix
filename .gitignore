@@ -9,3 +9,7 @@ build/
 *.db
 .mimocode/
 fundlist.csv
+*.xlsx
+.env
+.env.*
+*.log

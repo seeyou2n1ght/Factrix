@@ -15,21 +15,24 @@ from src.engine.rbsa import (
 )
 
 
-def _solve_window_rbsa(y: np.ndarray, X: np.ndarray) -> Dict[str, float]:
+def _solve_window_rbsa(y: np.ndarray, X: np.ndarray, init_w: Optional[np.ndarray] = None) -> Dict[str, float]:
     """Run constrained RBSA regression on a single window slice.
 
     Directly solves the quadratic program without re-parsing NAV/benchmark data.
+    Uses warm-start initialization if init_w is provided to accelerate SLSQP convergence.
     Falls back to NNLS + normalization on optimizer failure.
 
     Args:
         y: Portfolio daily returns array (N,).
         X: Factor matrix (N, 5).
+        init_w: Optional warm-start initial guess array (5,).
 
     Returns:
         Dict mapping factor_key -> weight float.
     """
     n_factors = X.shape[1]
-    init_w = np.ones(n_factors) / n_factors
+    if init_w is None:
+        init_w = np.ones(n_factors) / n_factors
 
     var_y = np.var(y)
     if var_y < 1e-12:
@@ -118,12 +121,15 @@ class RollingRBSAEngine:
         recorded_dates = []
 
         # 2. Rolling Window — slice arrays directly, no re-parsing
+        prev_w = None
         for i in range(effective_window, n_rows + 1):
             y_sub = y_all[i - effective_window:i]
             X_sub = X_all[i - effective_window:i, :]
             window_date = dates[i - 1]
 
-            weights = _solve_window_rbsa(y_sub, X_sub)
+            weights = _solve_window_rbsa(y_sub, X_sub, init_w=prev_w)
+            prev_w = np.array([weights[k] for k in FACTOR_KEYS])
+            
             records.append(weights)
             recorded_dates.append(window_date)
 

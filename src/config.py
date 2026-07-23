@@ -8,9 +8,22 @@ import os
 from pathlib import Path
 from typing import Dict, List, Tuple
 
+import glob
+
 # Project Directory Paths
 BASE_DIR: Path = Path(__file__).resolve().parent.parent
-DEFAULT_CSV_PATH: Path = BASE_DIR / "fundlist.csv"
+
+def get_latest_data_file() -> Path:
+    """Find the latest Fund E-Account export file in the base directory."""
+    pattern = str(BASE_DIR / "基金E账户App投资者公募基金持有信息-*.xlsx")
+    files = glob.glob(pattern)
+    if not files:
+        return BASE_DIR / "基金E账户App投资者公募基金持有信息-2026-07-17.xlsx"
+    # Sort files by name (which contains the YYYY-MM-DD date) in descending order
+    files.sort(reverse=True)
+    return Path(files[0])
+
+DEFAULT_FILE_PATH: Path = get_latest_data_file()
 DB_PATH: Path = BASE_DIR / "fund_data.db"
 
 # AkShare Data Fetching Settings
@@ -69,13 +82,84 @@ SECTOR_CATEGORY_MAP: Dict[str, str] = {
     '环保': '周期资源',
 }
 
+# CSRC (China Securities Regulatory Commission) 19 Industry Categories Mapping
+CSRC_SECTOR_CATEGORY_MAP: Dict[str, str] = {
+    # 农、林、牧、渔业
+    '农、林、牧、渔业': '大消费',
+    '农林牧渔业': '大消费',
+    '农林牧渔': '大消费',
+    # 采矿业
+    '采矿业': '周期资源',
+    # 制造业及具体子类
+    '制造业': '科技制造',
+    '医药制造业': '医药健康',
+    '电子及通信设备制造业': '科技制造',
+    '计算机、通信和其他电子设备制造业': '科技制造',
+    '计算机通信和其他电子设备制造业': '科技制造',
+    '电气机械和器材制造业': '科技制造',
+    '汽车制造业': '科技制造',
+    '专用设备制造业': '科技制造',
+    '通用设备制造业': '科技制造',
+    '化学原料和化学制品制造业': '周期资源',
+    '黑色金属冶炼和压延加工业': '周期资源',
+    '有色金属冶炼和压延加工业': '周期资源',
+    '非金属矿物制品业': '周期资源',
+    '食品制造业': '大消费',
+    '酒、饮料和精制茶制造业': '大消费',
+    '酒饮料和精制茶制造业': '大消费',
+    '纺织业': '大消费',
+    # 电力、热力、燃气及水生产和供应业
+    '电力、热力、燃气及水生产和供应业': '周期资源',
+    '电力热力燃气及水生产供应业': '周期资源',
+    '电力、热力、燃气及水生产与供应业': '周期资源',
+    # 建筑业
+    '建筑业': '周期资源',
+    # 批发和零售业
+    '批发和零售业': '大消费',
+    '批发与零售业': '大消费',
+    # 交通运输、仓储和邮政业
+    '交通运输、仓储和邮政业': '周期资源',
+    '交通运输仓储和邮政业': '周期资源',
+    '交通运输业': '周期资源',
+    # 住宿和餐饮业
+    '住宿和餐饮业': '大消费',
+    # 信息传输、软件和信息技术服务业
+    '信息传输、软件和信息技术服务业': '科技制造',
+    '信息传输软件和信息技术服务业': '科技制造',
+    '信息传输、计算机服务和软件业': '科技制造',
+    # 金融业
+    '金融业': '大金融',
+    # 房地产业
+    '房地产业': '大金融',
+    # 租赁和商务服务业
+    '租赁和商务服务业': '大金融',
+    # 科学研究和技术服务业
+    '科学研究和技术服务业': '科技制造',
+    # 水利、环境和公共设施管理业
+    '水利、环境和公共设施管理业': '周期资源',
+    '水利环境和公共设施管理业': '周期资源',
+    # 居民服务、修理和其他服务业
+    '居民服务、修理和其他服务业': '大消费',
+    '居民服务和其他服务业': '大消费',
+    # 教育
+    '教育': '大消费',
+    # 卫生和社会工作
+    '卫生和社会工作': '医药健康',
+    '卫生与社会工作': '医药健康',
+    # 文化、体育和娱乐业
+    '文化、体育和娱乐业': '大消费',
+    '文化体育和娱乐业': '大消费',
+    # 综合
+    '综合': '大金融',
+}
+
 DEFAULT_SECTOR_CATEGORY: str = '其他'
 
 def get_sector_category(sector_name: str) -> str:
-    """Get broad sector category for a given detailed sector name.
+    """Get broad sector category for a given detailed sector or CSRC industry name.
 
     Args:
-        sector_name: Name of the detailed sector or industry.
+        sector_name: Name of the detailed sector or CSRC industry.
 
     Returns:
         Mapped broad category string. Returns '其他' if not mapped.
@@ -83,7 +167,29 @@ def get_sector_category(sector_name: str) -> str:
     if not sector_name or not isinstance(sector_name, str):
         return DEFAULT_SECTOR_CATEGORY
     sector_clean = sector_name.strip()
-    return SECTOR_CATEGORY_MAP.get(sector_clean, DEFAULT_SECTOR_CATEGORY)
+
+    # 1. Direct lookup in Shenwan or CSRC map
+    if sector_clean in SECTOR_CATEGORY_MAP:
+        return SECTOR_CATEGORY_MAP[sector_clean]
+    if sector_clean in CSRC_SECTOR_CATEGORY_MAP:
+        return CSRC_SECTOR_CATEGORY_MAP[sector_clean]
+
+    # 2. Punctuation stripping match
+    no_punct = sector_clean.replace('、', '').replace(' ', '').replace('，', '')
+    if no_punct in CSRC_SECTOR_CATEGORY_MAP:
+        return CSRC_SECTOR_CATEGORY_MAP[no_punct]
+    if no_punct in SECTOR_CATEGORY_MAP:
+        return SECTOR_CATEGORY_MAP[no_punct]
+
+    # 3. Substring matching against known keys
+    for key, val in CSRC_SECTOR_CATEGORY_MAP.items():
+        if len(key) >= 2 and (key in sector_clean or sector_clean in key):
+            return val
+    for key, val in SECTOR_CATEGORY_MAP.items():
+        if len(key) >= 2 and (key in sector_clean or sector_clean in key):
+            return val
+
+    return DEFAULT_SECTOR_CATEGORY
 
 # Prospect Theory Parameters (Kahneman & Tversky, 1992)
 PROSPECT_LAMBDA: float = 2.25  # Loss aversion coefficient lambda

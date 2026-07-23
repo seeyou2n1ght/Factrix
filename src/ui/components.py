@@ -1,12 +1,15 @@
 """UI Components module for Factrix Streamlit dashboard.
 
 Provides custom CSS injections, panorama health diagnostic cards, plain-language (vernacular)
-educational callouts, rebalance trade action guides, and stock penetration tables.
+educational callouts, rebalance trade action guides, stock penetration tables, retail risk profiling cards,
+and RMB loss simulations.
 """
 
 from typing import Dict, Any, List, Optional
 import pandas as pd
+import numpy as np
 import streamlit as st
+import plotly.express as px
 
 
 VERNACULAR_EXPLANATIONS: Dict[str, Dict[str, str]] = {
@@ -66,132 +69,208 @@ def set_global_css() -> None:
     """Inject modern, responsive global CSS styles into Streamlit app."""
     css = """
     <style>
-    /* Main layout & background styling */
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap');
+
+    /* Main layout & typography styling */
     .stApp {
-        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+        font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+        background-color: #f8fafc;
+    }
+
+    /* Metric cards styling override */
+    [data-testid="stMetric"] {
+        background: rgba(255, 255, 255, 0.7);
+        backdrop-filter: blur(12px);
+        -webkit-backdrop-filter: blur(12px);
+        border: 1px solid rgba(255, 255, 255, 0.5);
+        border-radius: 16px;
+        padding: 20px 24px;
+        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.03), 0 1px 3px rgba(0, 0, 0, 0.05);
+        transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.25s cubic-bezier(0.4, 0, 0.2, 1);
     }
     
+    [data-testid="stMetric"]:hover {
+        transform: translateY(-4px);
+        box-shadow: 0 12px 28px rgba(0, 0, 0, 0.07), 0 4px 8px rgba(0, 0, 0, 0.04);
+    }
+
     /* Panorama Health Diagnostic Card Container */
     .health-card-container {
-        background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
-        border-radius: 16px;
-        padding: 24px;
+        background: linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #334155 100%);
+        border-radius: 20px;
+        padding: 32px 36px;
         color: #f8fafc;
-        box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.3);
-        margin-bottom: 24px;
-        border: 1px solid #334155;
+        box-shadow: 0 16px 40px -10px rgba(15, 23, 42, 0.6), 0 8px 16px rgba(0, 0, 0, 0.3);
+        margin-bottom: 32px;
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        position: relative;
+        overflow: hidden;
+        transition: transform 0.3s ease, box-shadow 0.3s ease;
     }
     
+    .health-card-container:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 20px 48px -10px rgba(15, 23, 42, 0.7), 0 10px 20px rgba(0, 0, 0, 0.4);
+    }
+
+    .health-card-container::before {
+        content: '';
+        position: absolute;
+        top: -50%; left: -50%; width: 200%; height: 200%;
+        background: radial-gradient(circle, rgba(255,255,255,0.05) 0%, rgba(255,255,255,0) 60%);
+        pointer-events: none;
+    }
+
     .health-header-row {
         display: flex;
         justify-content: space-between;
         align-items: center;
-        margin-bottom: 16px;
+        margin-bottom: 20px;
+        position: relative;
+        z-index: 1;
     }
     
     .health-title {
-        font-size: 1.4rem;
-        font-weight: 700;
-        color: #e2e8f0;
+        font-size: 1.6rem;
+        font-weight: 800;
+        color: #f1f5f9;
+        letter-spacing: 0.5px;
         margin: 0;
+        text-shadow: 0 2px 4px rgba(0,0,0,0.3);
     }
     
     /* Grade Color Badges */
     .grade-badge {
         display: inline-block;
-        padding: 6px 16px;
-        border-radius: 20px;
+        padding: 8px 24px;
+        border-radius: 30px;
         font-size: 1.2rem;
         font-weight: 800;
         text-align: center;
+        letter-spacing: 0.8px;
+        text-transform: uppercase;
+        position: relative;
+        z-index: 1;
     }
     
     .badge-excellent {
-        background-color: #059669;
+        background: linear-gradient(135deg, #059669 0%, #34d399 100%);
         color: #ffffff;
-        box-shadow: 0 0 12px rgba(16, 185, 129, 0.4);
+        box-shadow: 0 0 20px rgba(16, 185, 129, 0.6), inset 0 2px 4px rgba(255,255,255,0.3);
     }
     
     .badge-good {
-        background-color: #2563eb;
+        background: linear-gradient(135deg, #2563eb 0%, #60a5fa 100%);
         color: #ffffff;
-        box-shadow: 0 0 12px rgba(59, 130, 246, 0.4);
+        box-shadow: 0 0 20px rgba(59, 130, 246, 0.6), inset 0 2px 4px rgba(255,255,255,0.3);
     }
     
     .badge-medium {
-        background-color: #d97706;
+        background: linear-gradient(135deg, #d97706 0%, #fbbf24 100%);
         color: #ffffff;
-        box-shadow: 0 0 12px rgba(245, 158, 11, 0.4);
+        box-shadow: 0 0 20px rgba(245, 158, 11, 0.6), inset 0 2px 4px rgba(255,255,255,0.3);
     }
     
     .badge-maintenance {
-        background-color: #dc2626;
+        background: linear-gradient(135deg, #dc2626 0%, #f87171 100%);
         color: #ffffff;
-        box-shadow: 0 0 12px rgba(239, 68, 68, 0.4);
+        box-shadow: 0 0 20px rgba(239, 68, 68, 0.6), inset 0 2px 4px rgba(255,255,255,0.3);
     }
     
     .score-number {
-        font-size: 3rem;
+        font-size: 4.2rem;
         font-weight: 900;
         line-height: 1;
-        background: linear-gradient(90deg, #38bdf8, #818cf8);
+        background: linear-gradient(135deg, #38bdf8 0%, #818cf8 50%, #c084fc 100%);
         -webkit-background-clip: text;
         -webkit-text-fill-color: transparent;
+        filter: drop-shadow(0 2px 4px rgba(0,0,0,0.2));
+        position: relative;
+        z-index: 1;
     }
 
     .summary-box {
-        background-color: rgba(255, 255, 255, 0.05);
-        border-left: 4px solid #38bdf8;
-        padding: 14px 18px;
-        border-radius: 6px;
-        font-size: 1.05rem;
-        line-height: 1.6;
+        background: rgba(255, 255, 255, 0.08);
+        border-left: 5px solid #38bdf8;
+        padding: 20px 24px;
+        border-radius: 16px;
+        font-size: 1.1rem;
+        line-height: 1.8;
         color: #f1f5f9;
-        margin-top: 16px;
-        margin-bottom: 16px;
+        margin-top: 24px;
+        backdrop-filter: blur(12px);
+        -webkit-backdrop-filter: blur(12px);
+        border: 1px solid rgba(255, 255, 255, 0.05);
+        position: relative;
+        z-index: 1;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.1);
     }
     
     /* Action & Trade Badges */
     .action-buy {
-        background-color: #10b981;
+        background: linear-gradient(135deg, #059669 0%, #10b981 100%);
         color: #ffffff;
-        padding: 4px 12px;
-        border-radius: 6px;
+        padding: 6px 16px;
+        border-radius: 10px;
         font-weight: 700;
+        font-size: 0.95rem;
+        box-shadow: 0 2px 8px rgba(16, 185, 129, 0.3);
     }
     
     .action-sell {
-        background-color: #ef4444;
+        background: linear-gradient(135deg, #dc2626 0%, #ef4444 100%);
         color: #ffffff;
-        padding: 4px 12px;
-        border-radius: 6px;
+        padding: 6px 16px;
+        border-radius: 10px;
         font-weight: 700;
+        font-size: 0.95rem;
+        box-shadow: 0 2px 8px rgba(239, 68, 68, 0.3);
     }
 
     .tip-box {
-        background-color: #fffbe6;
-        border: 1px solid #ffe58f;
-        padding: 10px 14px;
-        border-radius: 8px;
-        color: #8c6b00;
+        background: linear-gradient(135deg, #fefce8 0%, #fef08a 100%);
+        border: 1px solid #fde047;
+        padding: 14px 18px;
+        border-radius: 12px;
+        color: #854d0e;
         font-size: 0.95rem;
-        margin-top: 6px;
+        font-weight: 600;
+        margin-top: 14px;
+        box-shadow: 0 2px 10px rgba(253, 224, 71, 0.2);
     }
     
     /* Vernacular Callout Card */
     .vernacular-card {
-        background-color: #f0f9ff;
-        border-left: 5px solid #0284c7;
-        border-radius: 8px;
-        padding: 14px 18px;
-        margin-bottom: 20px;
+        background: rgba(240, 249, 255, 0.85);
+        backdrop-filter: blur(12px);
+        -webkit-backdrop-filter: blur(12px);
+        border-left: 6px solid #0284c7;
+        border-radius: 16px;
+        padding: 20px 24px;
+        margin-bottom: 24px;
         color: #0c4a6e;
+        box-shadow: 0 8px 24px rgba(2, 132, 199, 0.08), 0 2px 8px rgba(2, 132, 199, 0.04);
+        border: 1px solid rgba(255, 255, 255, 0.6);
+        transition: transform 0.2s ease, box-shadow 0.2s ease;
+    }
+    .vernacular-card:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 12px 28px rgba(2, 132, 199, 0.12), 0 4px 12px rgba(2, 132, 199, 0.06);
     }
     .vernacular-card h5 {
         margin-top: 0;
-        margin-bottom: 8px;
+        margin-bottom: 10px;
         color: #0369a1;
-        font-weight: 700;
+        font-weight: 800;
+        font-size: 1.2rem;
+        letter-spacing: 0.3px;
+    }
+    
+    /* Dataframe overrides */
+    [data-testid="stDataFrame"] {
+        border-radius: 12px;
+        overflow: hidden;
+        box-shadow: 0 4px 16px rgba(0, 0, 0, 0.05);
     }
     </style>
     """
@@ -257,7 +336,7 @@ def render_health_score_card(diagnostic_res: Dict[str, Any]) -> None:
         </div>
         <div style="display: flex; align-items: baseline; gap: 16px;">
             <div class="score-number">{score}</div>
-            <div style="color: #94a3b8; font-size: 1.1rem;">/ 100 分 (综合7大维度算盘)</div>
+            <div style="color: #94a3b8; font-size: 1.1rem; font-weight: 500;">/ 100 分 (综合7大维度算盘)</div>
         </div>
         <div class="summary-box">
             {summary_text.replace(chr(10), '<br>')}
@@ -322,13 +401,13 @@ def render_rebalance_guide(rebalance_res: Dict[str, Any]) -> None:
 
         st.markdown(
             f"""
-            <div style="background-color: #ffffff; border: 1px solid #e2e8f0; border-radius: 10px; padding: 14px; margin-bottom: 10px; box-shadow: 0 2px 4px rgba(0,0,0,0.05);">
+            <div style="background: linear-gradient(135deg, #ffffff 0%, #f8fafc 100%); border: 1px solid #e2e8f0; border-radius: 16px; padding: 18px; margin-bottom: 14px; box-shadow: 0 4px 16px -2px rgba(0,0,0,0.05);">
                 <div style="display: flex; justify-content: space-between; align-items: center;">
                     <div>
-                        <span style="font-weight: 700; font-size: 1.1rem; color: #1e293b; margin-right: 12px;">{idx}. 基金代码：{fund_code}</span>
+                        <span style="font-weight: 700; font-size: 1.1rem; color: #0f172a; margin-right: 12px;">{idx}. 基金代码：{fund_code}</span>
                         {action_badge}
                     </div>
-                    <div style="font-weight: 800; font-size: 1.2rem; color: #0f172a;">
+                    <div style="font-weight: 800; font-size: 1.25rem; color: #0f172a;">
                         金额：¥ {amount:,.2f} 元
                     </div>
                 </div>
@@ -370,4 +449,227 @@ def render_top_stocks_table(top_stocks_df: pd.DataFrame, top_n: int = 10) -> Non
     if "组合穿透占比 (%)" in df_render.columns:
         df_render["组合穿透占比 (%)"] = df_render["组合穿透占比 (%)"].apply(lambda x: f"{float(x):.2f}%")
 
-    st.dataframe(df_render, use_container_width=True)
+    st.dataframe(df_render, width="stretch")
+
+
+def create_portfolio_treemap(drilldown_data: List[Dict[str, Any]]) -> Any:
+    """Create a multi-level interactive Plotly Treemap for portfolio visualization.
+    
+    Args:
+        drilldown_data: List of dicts with keys ['macro', 'sector', 'fund', 'stock', 'weight'].
+        
+    Returns:
+        Plotly Figure object.
+    """
+    if not drilldown_data:
+        return None
+        
+    df = pd.DataFrame(drilldown_data)
+    
+    # Premium vibrant color palette
+    premium_colors = ['#00F0FF', '#FF0055', '#8A2BE2', '#FF7F00', '#00ffaa', '#ffe600', '#00bfff', '#ff1493']
+    
+    fig = px.treemap(
+        df,
+        path=[px.Constant("全景持仓 (Portfolio)"), 'macro', 'sector', 'fund', 'stock'],
+        values='weight',
+        color='macro',
+        color_discrete_sequence=premium_colors,
+        template='plotly_dark'
+    )
+    
+    # Customize traces for a glassmorphism/modern feel
+    fig.update_traces(
+        textinfo="label+percent parent",
+        textfont=dict(family="Inter, Roboto, sans-serif", size=16, color="white", weight="bold"),
+        hovertemplate='<span style="font-size:18px; font-weight:bold;">%{label}</span><br><br>全局占比: %{value:.2f}%<br>在父级中占比: %{percentParent}<extra></extra>',
+        marker=dict(
+            line=dict(width=2, color='#0f172a'),
+            pad=dict(t=35, l=4, r=4, b=4)
+        ),
+        pathbar=dict(
+            visible=True,
+            textfont=dict(family="Inter, Roboto, sans-serif", size=14, color="white"),
+        ),
+        root_color="#0f172a"
+    )
+    
+    # High-end dark aesthetic layout
+    fig.update_layout(
+        margin=dict(t=20, l=10, r=10, b=10),
+        paper_bgcolor="#0f172a",
+        plot_bgcolor="#0f172a",
+        hoverlabel=dict(
+            bgcolor="rgba(15, 23, 42, 0.8)",
+            bordercolor="rgba(255, 255, 255, 0.2)",
+            font=dict(family="Inter, sans-serif", size=14, color="white")
+        ),
+        height=600
+    )
+    
+    return fig
+
+
+def render_risk_profile_card(
+    risk_profile: str,
+    cvar_95: float,
+    max_drawdown: float = 0.0
+) -> None:
+    """Render plain-language retail investor risk profiling card (保守型 / 稳健型 / 积极型).
+
+    Args:
+        risk_profile: Profile category string ('保守型', '稳健型', '积极型', or custom).
+        cvar_95: Portfolio 95% CVaR value (decimal or percentage).
+        max_drawdown: Portfolio Maximum Drawdown value (decimal or percentage).
+    """
+    if not isinstance(risk_profile, str) or not risk_profile.strip():
+        risk_profile = "稳健型"
+
+    try:
+        cvar_val = float(cvar_95) if cvar_95 is not None else 0.0
+        if np.isnan(cvar_val) or np.isinf(cvar_val):
+            cvar_val = 0.0
+    except (ValueError, TypeError):
+        cvar_val = 0.0
+
+    try:
+        mdd_val = float(max_drawdown) if max_drawdown is not None else 0.0
+        if np.isnan(mdd_val) or np.isinf(mdd_val):
+            mdd_val = 0.0
+    except (ValueError, TypeError):
+        mdd_val = 0.0
+
+    cvar_pct = cvar_val * 100.0 if abs(cvar_val) <= 1.0 else cvar_val
+    mdd_pct = mdd_val * 100.0 if abs(mdd_val) <= 1.0 else mdd_val
+
+    profiles_data = {
+        "保守型": {
+            "title": "🛡️ 保守型投资者画像 (低风险·本金安全优先)",
+            "color": "#059669",
+            "border_color": "#10b981",
+            "bg_color": "linear-gradient(135deg, #f0fdf4 0%, #dcfce7 100%)",
+            "traits": "追求本金极度安全与低波动，无法忍受较大暂性回撤，偏好稳定收益。",
+            "thresholds": "建议 95% CVaR 风险 < 5%，历史最大回撤控制在 8% 以内。",
+            "advice": "💡 白话指南：适合配置固收+、货币基金及高股息大盘价值资产，切忌盲目追高高估值赛道。"
+        },
+        "稳健型": {
+            "title": "⚖️ 稳健型投资者画像 (中风险·平衡增值)",
+            "color": "#2563eb",
+            "border_color": "#3b82f6",
+            "bg_color": "linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%)",
+            "traits": "追求风险与收益的有机平衡，能接受适度波动以换取中长期稳健资本增值。",
+            "thresholds": "建议 95% CVaR 风险 < 15%，历史最大回撤控制在 18% 以内。",
+            "advice": "💡 白话指南：推荐股债均衡多资产配置，通过风格穿透防止隐形抱团，定期动态再平衡锁住收益。"
+        },
+        "积极型": {
+            "title": "🚀 积极型投资者画像 (高风险·资本长远高增值)",
+            "color": "#dc2626",
+            "border_color": "#ef4444",
+            "bg_color": "linear-gradient(135deg, #fef2f2 0%, #fee2e2 100%)",
+            "traits": "追求高额资本增值，具备强风险承受能力与长期投资周期，能接纳较大幅度净值回撤。",
+            "thresholds": "95% CVaR 容忍度可达 25%+，最大回撤容忍度通常 > 25%。",
+            "advice": "💡 白话指南：可重点布局高弹性成长股与行业主题基金，但需做好黑天鹅极端压力测试，严防尾部风险。"
+        }
+    }
+
+    profile_key = "稳健型"
+    for k in profiles_data.keys():
+        if k in risk_profile:
+            profile_key = k
+            break
+
+    prof = profiles_data[profile_key]
+
+    card_html = f"""
+    <div style="background: {prof['bg_color']}; border-left: 6px solid {prof['border_color']}; border-radius: 16px; padding: 24px; margin-bottom: 24px; box-shadow: 0 4px 16px rgba(0,0,0,0.05);">
+        <h4 style="margin-top:0; color: {prof['color']}; font-weight: 800; font-size: 1.25rem;">{prof['title']}</h4>
+        <p style="margin: 8px 0; color: #1e293b; font-size: 1.0rem;"><b>投资者特征:</b> {prof['traits']}</p>
+        <p style="margin: 8px 0; color: #1e293b; font-size: 1.0rem;"><b>损失耐受阀值:</b> {prof['thresholds']}</p>
+        <div style="display: flex; gap: 24px; margin: 16px 0; background: rgba(255,255,255,0.7); padding: 12px 16px; border-radius: 12px; border: 1px solid rgba(0,0,0,0.05);">
+            <div><span style="color: #64748b; font-size: 0.9rem;">当前组合 95% CVaR 风险:</span> <b style="color: #0f172a; font-size: 1.1rem;">{cvar_pct:.2f}%</b></div>
+            <div><span style="color: #64748b; font-size: 0.9rem;">当前组合 最大回撤 (MDD):</span> <b style="color: #0f172a; font-size: 1.1rem;">{mdd_pct:.2f}%</b></div>
+        </div>
+        <div style="margin-top: 12px; color: #334155; font-weight: 600; font-size: 0.95rem;">{prof['advice']}</div>
+    </div>
+    """
+    st.markdown(card_html, unsafe_allow_html=True)
+
+
+def render_rmb_loss_simulation(
+    portfolio_value: float,
+    cvar_95: float,
+    cvar_99: float = 0.0
+) -> None:
+    """Render intuitive RMB loss simulation cards converting statistical parameters to financial figures.
+
+    Args:
+        portfolio_value: Total portfolio value in RMB (float).
+        cvar_95: 95% CVaR loss ratio (float, decimal or percentage).
+        cvar_99: 99% CVaR loss ratio (float, decimal or percentage).
+    """
+    try:
+        p_val = float(portfolio_value) if portfolio_value is not None else 0.0
+        if np.isnan(p_val) or np.isinf(p_val) or p_val < 0:
+            p_val = 0.0
+    except (ValueError, TypeError):
+        p_val = 0.0
+
+    try:
+        cvar95_val = float(cvar_95) if cvar_95 is not None else 0.0
+        if np.isnan(cvar95_val) or np.isinf(cvar95_val):
+            cvar95_val = 0.0
+    except (ValueError, TypeError):
+        cvar95_val = 0.0
+
+    try:
+        cvar99_val = float(cvar_99) if cvar_99 is not None else 0.0
+        if np.isnan(cvar99_val) or np.isinf(cvar99_val):
+            cvar99_val = 0.0
+    except (ValueError, TypeError):
+        cvar99_val = 0.0
+
+    cvar95_ratio = cvar95_val / 100.0 if abs(cvar95_val) > 1.0 else cvar95_val
+    cvar99_ratio = cvar99_val / 100.0 if abs(cvar99_val) > 1.0 else cvar99_val
+
+    cvar95_ratio = abs(cvar95_ratio)
+    cvar99_ratio = abs(cvar99_ratio)
+
+    loss_95_amt = p_val * cvar95_ratio
+    loss_99_amt = p_val * cvar99_ratio
+
+    st.markdown("#### 💰 人民币真实亏损情景模拟算盘")
+
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.metric(
+            label="当前持仓总资产规模",
+            value=f"¥ {p_val:,.2f} 元",
+            help="计算亏损模拟的基本盘总计本金"
+        )
+    with col2:
+        st.metric(
+            label="95% 极端概率下预估亏损金额",
+            value=f"¥ {loss_95_amt:,.2f} 元",
+            delta=f"-{cvar95_ratio * 100.0:.2f}%",
+            delta_color="inverse",
+            help="在 95% 置信水平下，极端下行行情中预估的最大平均本金亏损"
+        )
+    with col3:
+        st.metric(
+            label="99% 黑天鹅剧烈暴跌下预估亏损",
+            value=f"¥ {loss_99_amt:,.2f} 元" if cvar99_ratio > 0 else "未评估 / 0.00 元",
+            delta=f"-{cvar99_ratio * 100.0:.2f}%" if cvar99_ratio > 0 else None,
+            delta_color="inverse",
+            help="在 99% 置信水平下（百年一遇极端踩踏），预估的最大本金损失"
+        )
+
+    st.markdown(
+        f"""
+        <div class="tip-box" style="margin-top: 12px; background: #fffbe6; border-color: #ffe58f; color: #873800;">
+            💡 <b>白话换算视角:</b> 以您的 <b>¥ {p_val:,.0f} 元</b> 总投资计算，在 95% 概率的最坏 5% 交易日里，
+            预计平均损失约 <b>¥ {loss_95_amt:,.2f} 元</b>。
+            {f'在 99% 极度恶化场景下，预计损失可达 <b>¥ {loss_99_amt:,.2f} 元</b>。' if cvar99_ratio > 0 else ''}
+        </div>
+        """,
+        unsafe_allow_html=True
+    )

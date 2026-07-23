@@ -71,8 +71,8 @@ class FundFetcher:
                 if isinstance(result, pd.DataFrame) and not result.empty:
                     return result
                 elif isinstance(result, pd.DataFrame) and result.empty:
-                    # Empty DataFrame returned, might be valid empty or transient failure
-                    logger.warning(f"Attempt {attempt + 1}/{self.max_retries}: Empty DataFrame returned")
+                    # Empty DataFrame returned (valid for non-equity funds or empty holdings)
+                    logger.debug(f"Attempt {attempt + 1}/{self.max_retries}: Empty DataFrame returned")
                     return result
                 return pd.DataFrame()
             except Exception as e:
@@ -141,11 +141,31 @@ class FundFetcher:
     def _fetch_akshare_fund_nav(self, fund_code: str) -> pd.DataFrame:
         """Raw AkShare API call for fund NAV."""
         import akshare as ak
-        # Try primary fund info indicator
-        try:
-            return ak.fund_open_fund_info_em(fund=fund_code, indicator="单位净值走势")
-        except Exception:
-            return ak.fund_etf_fund_info_em(fund=fund_code)
+        import warnings
+        
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            # Try primary fund info indicator
+            try:
+                df = ak.fund_open_fund_info_em(symbol=fund_code, indicator="单位净值走势")
+                if df is not None and df.empty:
+                    # Might be a money market fund
+                    try:
+                        df_mm = ak.fund_money_fund_info_em(symbol=fund_code)
+                        if df_mm is not None and not df_mm.empty:
+                            return df_mm
+                    except Exception:
+                        pass
+                    return ak.fund_etf_fund_info_em(fund=fund_code)
+                return df
+            except Exception:
+                try:
+                    df_mm = ak.fund_money_fund_info_em(symbol=fund_code)
+                    if df_mm is not None and not df_mm.empty:
+                        return df_mm
+                except Exception:
+                    pass
+                return ak.fund_etf_fund_info_em(fund=fund_code)
 
     def _clean_and_impute_nav(self, df: pd.DataFrame) -> pd.DataFrame:
         """Clean raw AkShare NAV DataFrame and apply imputation smoothing."""
@@ -157,6 +177,20 @@ class FundFetcher:
             if col in df_clean.columns:
                 date_col = col
                 break
+
+        # Handle Money Market Funds (货币基金)
+        if '每万份收益' in df_clean.columns:
+            if not date_col:
+                logger.warning("Date column not found in Money Market Fund DataFrame")
+                return pd.DataFrame(columns=['date', 'nav', 'daily_return'])
+            
+            df_clean['date'] = pd.to_datetime(df_clean[date_col], errors='coerce').dt.strftime('%Y-%m-%d')
+            df_clean['daily_return'] = pd.to_numeric(df_clean['每万份收益'], errors='coerce').fillna(0.0) / 10000.0
+            
+            df_clean = df_clean.dropna(subset=['date']).sort_values('date').reset_index(drop=True)
+            # Reconstruct synthetic NAV (starting at 1.0)
+            df_clean['nav'] = (1.0 + df_clean['daily_return']).cumprod()
+            return df_clean[['date', 'nav', 'daily_return']]
 
         # Find nav column
         nav_col = None
@@ -243,7 +277,7 @@ class FundFetcher:
         try:
             return ak.fund_portfolio_hold_em(symbol=fund_code)
         except Exception:
-            return ak.fund_open_fund_info_em(fund=fund_code, indicator="持仓明细")
+            return ak.fund_open_fund_info_em(symbol=fund_code, indicator="持仓明细")
 
     def _clean_holdings_data(self, df: pd.DataFrame, fund_code: str) -> pd.DataFrame:
         """Normalize raw AkShare holdings DataFrame and map sector categories."""
@@ -257,7 +291,7 @@ class FundFetcher:
         report_date_col = next((c for c in ['季度', '报告期', 'report_date', '截止时间'] if c in df_clean.columns), None)
 
         if not stock_code_col:
-            logger.warning("Stock code column not found in holdings data")
+            logger.debug("Stock code column not found in holdings data")
             return pd.DataFrame(columns=['stock_code', 'stock_name', 'weight', 'sector', 'report_date'])
 
         # Stock code cleaning (6 digits zero padded)
@@ -293,6 +327,103 @@ class FundFetcher:
         output_cols = ['stock_code', 'stock_name', 'weight', 'sector', 'report_date']
         df_out = df_clean[output_cols].sort_values('weight', ascending=False).reset_index(drop=True)
         return df_out
+
+    # --- Fund Industry Allocation Fetching ---
+
+    def get_fund_industry_allocation(
+        self,
+        fund_code: str,
+        report_date: Optional[str] = None
+    ) -> pd.DataFrame:
+        """Fetch fund full portfolio industry allocation data with cache priority.
+
+        Args:
+            fund_code: 6-digit fund code string.
+            report_date: Optional report date string.
+
+        Returns:
+            DataFrame with columns ['industry_name', 'weight', 'market_value', 'broad_sector', 'report_date'].
+        """
+        fund_code_clean = str(fund_code).zfill(6)
+
+        # 1. Check SQLite Cache
+        df_cached = self.storage.get_industry_allocation(fund_code_clean, report_date=report_date)
+        if not df_cached.empty:
+            logger.info(f"Cache hit for fund_industry_allocation {fund_code_clean} ({len(df_cached)} records)")
+            return df_cached
+
+        # 2. Cache Miss - Fetch from AkShare API
+        logger.info(f"Cache miss for fund_industry_allocation {fund_code_clean}, fetching from AkShare...")
+        try:
+            df_api = self._execute_with_retry(self._fetch_akshare_industry_allocation, fund_code_clean)
+            if not df_api.empty:
+                df_clean = self._clean_industry_allocation_data(df_api, fund_code_clean)
+                if not df_clean.empty:
+                    r_date = report_date or (df_clean['report_date'].iloc[0] if 'report_date' in df_clean.columns else '')
+                    self.storage.save_industry_allocation(fund_code_clean, df_clean, report_date=r_date)
+                    return df_clean
+        except Exception as e:
+            logger.info(f"Industry allocation unavailable for fund {fund_code_clean}: {e}")
+
+        # 3. Fallback: Check for any cached industry allocation without report_date filter
+        df_all_cached = self.storage.get_industry_allocation(fund_code_clean)
+        if not df_all_cached.empty:
+            logger.info(f"Using fallback cached industry allocation for fund {fund_code_clean}")
+            return df_all_cached
+
+        # 4. Ultimate Fallback: Empty DataFrame
+        logger.info(f"Returning empty DataFrame fallback for fund_industry_allocation {fund_code_clean}")
+        return pd.DataFrame(columns=['industry_name', 'weight', 'market_value', 'broad_sector', 'report_date'])
+
+    def _fetch_akshare_industry_allocation(self, fund_code: str) -> pd.DataFrame:
+        """Raw AkShare API call for fund industry allocation."""
+        import akshare as ak
+        try:
+            return ak.fund_portfolio_industry_allocation_cninfo(symbol=fund_code)
+        except Exception:
+            try:
+                return ak.fund_portfolio_industry_allocation_em(symbol=fund_code)
+            except Exception:
+                return ak.fund_open_fund_info_em(symbol=fund_code, indicator="行业配置")
+
+    def _clean_industry_allocation_data(self, df: pd.DataFrame, fund_code: str) -> pd.DataFrame:
+        """Normalize raw AkShare industry allocation DataFrame."""
+        df_clean = df.copy()
+
+        ind_col = next((c for c in ['行业类别', '行业名称', 'industry_name', '行业', 'CSRC行业', '申万行业'] if c in df_clean.columns), None)
+        weight_col = next((c for c in ['占净值比例', '持仓比例', 'weight', '配置比例', '占净值比', '占净值比例(%)'] if c in df_clean.columns), None)
+        val_col = next((c for c in ['市值', '持股市值', 'market_value', '市值(万元)'] if c in df_clean.columns), None)
+        report_date_col = next((c for c in ['截止时间', '报告期', 'report_date', '季度'] if c in df_clean.columns), None)
+
+        if not ind_col:
+            logger.warning("Industry column not found in industry allocation data")
+            return pd.DataFrame(columns=['industry_name', 'weight', 'market_value', 'broad_sector', 'report_date'])
+
+        df_clean['industry_name'] = df_clean[ind_col].astype(str).str.strip()
+
+        if weight_col:
+            w_series = df_clean[weight_col].astype(str).str.replace('%', '', regex=False)
+            raw_w = pd.to_numeric(w_series, errors='coerce').fillna(0.0)
+            if raw_w.max() > 1.5:
+                raw_w = raw_w / 100.0
+            df_clean['weight'] = raw_w
+        else:
+            df_clean['weight'] = 0.0
+
+        if val_col:
+            df_clean['market_value'] = pd.to_numeric(df_clean[val_col], errors='coerce').fillna(0.0)
+        else:
+            df_clean['market_value'] = 0.0
+
+        df_clean['broad_sector'] = df_clean['industry_name'].apply(get_sector_category)
+
+        if report_date_col:
+            df_clean['report_date'] = df_clean[report_date_col].astype(str).str.strip()
+        else:
+            df_clean['report_date'] = ''
+
+        output_cols = ['industry_name', 'weight', 'market_value', 'broad_sector', 'report_date']
+        return df_clean[output_cols].sort_values('weight', ascending=False).reset_index(drop=True)
 
     # --- Benchmark Fetching ---
 

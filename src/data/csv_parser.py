@@ -17,10 +17,10 @@ ALL_COLUMNS: List[str] = ['fund_code', 'fund_name', 'share', 'nav', 'market_valu
 
 
 def parse_fundlist_csv(csv_path: str, aggregate: bool = True) -> pd.DataFrame:
-    """Parse and clean public fund position CSV file.
+    """Parse and clean public fund position CSV or Excel file.
 
     Args:
-        csv_path: Absolute or relative path to the fund list CSV file.
+        csv_path: Absolute or relative path to the fund list file (CSV or Excel).
         aggregate: If True, aggregate positions with identical fund codes by summing shares
             and market values. Defaults to True.
 
@@ -33,21 +33,38 @@ def parse_fundlist_csv(csv_path: str, aggregate: bool = True) -> pd.DataFrame:
         ValueError: If parsing fails to yield any valid data or required columns.
     """
     if not os.path.exists(csv_path):
-        raise FileNotFoundError(f"Specified CSV file does not exist: {csv_path}")
+        raise FileNotFoundError(f"Specified file does not exist: {csv_path}")
 
-    # 1. Read raw CSV with string dtype to preserve leading zeroes
     df_raw: Optional[pd.DataFrame] = None
-    encodings_to_try = ['utf-8', 'utf-8-sig', 'gbk', 'gb18030']
     
-    for encoding in encodings_to_try:
+    if csv_path.lower().endswith(('.xlsx', '.xls')):
+        # Read Excel without header to scan for the true header row
         try:
-            df_raw = pd.read_csv(csv_path, dtype=str, encoding=encoding)
-            break
-        except (UnicodeDecodeError, Exception):
-            continue
+            temp_df = pd.read_excel(csv_path, header=None, dtype=str)
+            header_row_idx = None
+            for idx, row in temp_df.iterrows():
+                if '基金代码' in row.astype(str).values:
+                    header_row_idx = idx
+                    break
+            if header_row_idx is not None:
+                temp_df.columns = temp_df.iloc[header_row_idx]
+                df_raw = temp_df.iloc[header_row_idx + 1:].reset_index(drop=True)
+            else:
+                raise ValueError("Excel file does not contain a valid header row with '基金代码'")
+        except Exception as e:
+            raise ValueError(f"Failed to read Excel file {csv_path}: {e}")
+    else:
+        # 1. Read raw CSV with string dtype to preserve leading zeroes
+        encodings_to_try = ['utf-8', 'utf-8-sig', 'gbk', 'gb18030']
+        for encoding in encodings_to_try:
+            try:
+                df_raw = pd.read_csv(csv_path, dtype=str, encoding=encoding)
+                break
+            except (UnicodeDecodeError, Exception):
+                continue
 
     if df_raw is None or df_raw.empty:
-        raise ValueError(f"Failed to read CSV file or file is empty: {csv_path}")
+        raise ValueError(f"Failed to read file or file is empty: {csv_path}")
 
     # 2. Clean column names (strip newlines, carriage returns, and spaces)
     df_raw.columns = [
